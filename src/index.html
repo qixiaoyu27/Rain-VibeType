@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rain氛围输入法</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="window-shell">
+      <header class="titlebar" data-tauri-drag-region>
+        <div class="brand" data-tauri-drag-region>
+          <img src="assets/rain.svg" alt="" />
+          <span>RAIN</span><small data-i18n="brand_subtitle">氛围输入法 · RAIN-VIBETYPE</small>
+        </div>
+        <div class="window-actions">
+          <button id="minimize" class="chrome-button" aria-label="最小化">—</button>
+          <button id="close" class="chrome-button close" aria-label="关闭">×</button>
+        </div>
+      </header>
+
+      <div class="app-layout">
+        <aside class="rail" aria-label="设置导航">
+          <nav>
+            <button class="nav-item active" data-section="home"><i>01</i><span data-i18n="nav_home">概览</span></button>
+            <button class="nav-item" data-section="voice"><i>02</i><span data-i18n="nav_voice">录音与快捷键</span></button>
+            <button class="nav-item" data-section="models"><i>03</i><span data-i18n="nav_models">模型管理</span></button>
+            <button class="nav-item" data-section="general"><i>04</i><span data-i18n="nav_general">通用设置</span></button>
+            <button class="nav-item" data-section="output"><i>05</i><span data-i18n="nav_output">文字输入</span></button>
+            <button class="nav-item" data-section="feedback"><i>06</i><span data-i18n="nav_feedback">反馈提示</span></button>
+            <button class="nav-item" data-section="privacy"><i>07</i><span data-i18n="nav_privacy">隐私与诊断</span></button>
+          </nav>
+          <div class="rail-note"><i></i><span data-i18n="local_only">音频与识别文字仅在本机内存中处理</span></div>
+        </aside>
+
+        <main class="content">
+          <section id="home" class="page active">
+            <div class="eyebrow" data-i18n="home_eyebrow">本地语音，直接输入</div>
+            <h1 data-i18n="home_title">开口即写，内容不离开电脑。</h1>
+            <p class="lede" data-i18n="home_lede">按住快捷键说话，松开后 Rain 在本机识别，并安全写回原来的输入位置。</p>
+            <div class="hero-card">
+              <div class="hero-status">
+                <div id="status-orb" class="status-orb"><span></span></div>
+                <div>
+                  <p class="label" data-i18n="system_status_label">系统状态</p>
+                  <h2 id="runtime-status">正在检查</h2>
+                  <p id="runtime-detail">读取本机配置与模型状态…</p>
+                </div>
+              </div>
+              <div class="hotkey-block">
+                <span data-i18n="current_hotkey">当前快捷键</span>
+                <strong id="home-hotkey">Ctrl + Shift + Space</strong>
+              </div>
+            </div>
+            <div class="metric-grid">
+              <article><span class="metric-index" data-i18n="metric_model">模型</span><h3 id="home-model">未选择</h3><p data-i18n="home_model_hint">模型只从应用管理的本地目录加载。</p></article>
+              <article><span class="metric-index" data-i18n="metric_input">输入</span><h3 id="home-input">安全粘贴</h3><p data-i18n="home_input_hint">注入前会再次确认输入位置，默认恢复原剪贴板。</p></article>
+              <article><span class="metric-index" data-i18n="metric_privacy">隐私</span><h3 data-i18n="no_history">不保留历史</h3><p data-i18n="no_history_hint">不保存录音，不建立识别文字历史。</p></article>
+            </div>
+            <div id="recovery" class="recovery" hidden>
+              <div><span data-i18n="recovery_label">待恢复文字</span><strong data-i18n="recovery_title">目标位置和剪贴板均不可用，请手动复制</strong></div>
+              <button id="copy-recovery" class="primary" data-i18n="copy">复制</button>
+              <textarea id="recovery-text" readonly></textarea>
+            </div>
+          </section>
+
+          <section id="voice" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_capture">录音采集</div><h1 data-i18n="voice_title">录音与快捷键</h1></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="settings-grid">
+              <label class="field-card"><span data-i18n="recording_mode">录音方式</span><select id="recording-mode"><option value="push_to_talk" data-i18n="push_to_talk">按住说话，松开识别</option><option value="toggle" data-i18n="toggle_mode">按一次开始，再按一次结束</option></select></label>
+              <div class="field-card"><span data-i18n="hotkey">全局快捷键</span><button id="hotkey-recorder" class="key-recorder" type="button">Ctrl + Shift + Space</button><small data-i18n="hotkey_hint">点击后按下新的组合键；注册失败会自动保留旧快捷键。</small></div>
+              <label class="field-card"><span data-i18n="duration">最长录音时长（秒）</span><input id="max-recording-seconds" type="number" min="10" max="3600" step="1" list="duration-presets" /><datalist id="duration-presets"><option value="30"></option><option value="60"></option><option value="180"></option><option value="300"></option></datalist></label>
+              <label class="field-card"><span data-i18n="input_device">输入设备</span><select id="input-device"></select></label>
+              <div class="field-card wide mic-test"><span data-i18n="mic_test">麦克风测试</span><div class="meter"><i id="mic-meter"></i></div><button id="test-mic" class="secondary" data-i18n="test_500ms">测试 0.5 秒</button><small id="mic-result" aria-live="polite"></small></div>
+            </div>
+          </section>
+
+          <section id="models" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_models">本地模型</div><h1 data-i18n="models_title">模型管理</h1></div><div class="action-row compact"><button id="refresh-models" class="ghost" data-i18n="refresh">刷新</button><button id="check-model-updates" class="secondary" data-i18n="check_model_updates">检查模型更新</button></div></div>
+            <p class="section-note" data-i18n="models_note">下载支持断点续传、SHA-256 校验与原子安装；也可导入模型目录或 ZIP。</p>
+            <article id="runtime-card" class="model-card runtime-card" aria-live="polite">
+              <div class="model-heading"><div class="model-mark">AI</div><div><h2 data-i18n="runtime_component">本地推理组件</h2><p id="runtime-hardware">正在检测硬件…</p></div><span id="runtime-state" class="state-pill">未安装</span></div>
+              <p id="runtime-description" class="section-note">Rain 会按当前设备下载 CPU 或 NVIDIA 版本，组件安装后语音仍只在本机处理。</p>
+              <div id="runtime-download-progress" class="download-progress" hidden><i></i><span>0%</span></div>
+              <div class="model-actions"><button id="download-runtime" class="primary" data-i18n="download_runtime">下载推荐组件</button><button id="refresh-runtime" class="secondary" data-i18n="refresh_runtime">刷新组件清单</button></div>
+            </article>
+            <div id="model-list" class="model-list" aria-live="polite"></div>
+            <div class="settings-grid model-settings">
+              <div class="field-card wide"><span data-i18n="storage_dir">模型存储目录</span><div class="path-row"><input id="model-storage-dir" readonly placeholder="使用应用默认目录" /><button id="pick-storage-dir" class="secondary" data-i18n="choose">选择</button><button id="reset-storage-dir" class="ghost" data-i18n="reset">恢复默认</button></div><small data-i18n="storage_hint">更改后只影响后续下载；已安装模型不会自动移动。</small></div>
+              <label class="field-card"><span data-i18n="device">推理设备</span><select id="device-preference"><option value="auto" data-i18n="auto_device">自动选择</option><option value="cuda">CUDA</option><option value="cpu">CPU</option></select><small data-i18n="cpu_hint">CPU 模式功能完整，但大型模型的识别速度可能明显较慢。</small></label>
+              <label class="field-card"><span data-i18n="load_mode">模型加载方式</span><select id="model-load-mode"><option value="on_demand" data-i18n="on_demand">录音时并行加载</option><option value="resident" data-i18n="resident">常驻内存</option></select></label>
+              <label class="field-card"><span data-i18n="unload_policy">模型卸载策略</span><select id="unload-policy"><option value="immediate" data-i18n="unload_now">识别后立即卸载</option><option value="idle_timeout" data-i18n="unload_idle">空闲后卸载</option><option value="session" data-i18n="unload_session">退出时卸载</option></select></label>
+              <label class="field-card"><span data-i18n="idle_timeout">空闲卸载（秒）</span><input id="idle-timeout-seconds" type="number" min="10" max="86400" /></label>
+              <label class="field-card wide"><span data-i18n="python_path">开发者 Python Worker 路径</span><input id="python-path" autocomplete="off" /><small data-i18n="python_hint">仅供源码调试回退使用；正式安装版会优先使用上方已校验的推理组件。</small></label>
+            </div>
+            <div class="action-row"><button class="primary save-config" data-i18n="save_model_settings">保存模型设置</button><button id="check-worker" class="secondary" data-i18n="check_worker">检查 Worker</button><span id="worker-result" class="inline-result" aria-live="polite"></span></div>
+          </section>
+
+          <section id="general" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_system">系统</div><h1 data-i18n="general_title">通用设置</h1></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="settings-grid">
+              <label class="field-card switch-card"><span><b data-i18n="autostart">登录 Windows 时启动</b><small data-i18n="autostart_hint">默认开启，应用启动后驻留系统托盘。</small></span><input id="autostart" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="auto_update">启动时检查更新</b><small data-i18n="auto_update_hint">只检查签名更新，不会自动安装。</small></span><input id="auto-check-updates" type="checkbox" /></label>
+              <label class="field-card"><span data-i18n="language">界面语言</span><select id="ui-language"><option value="system" data-i18n="follow_system">跟随系统</option><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
+              <div class="field-card"><span data-i18n="updates">软件更新</span><div class="action-row compact"><button id="check-update" class="secondary" data-i18n="check_update">检查更新</button><button id="install-update" class="primary" hidden data-i18n="install_update">安装并重启</button></div><small id="update-result" aria-live="polite"></small></div>
+            </div>
+          </section>
+
+          <section id="output" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_output">文字投递</div><h1 data-i18n="output_title">文字输入</h1></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="settings-grid">
+              <label class="field-card"><span data-i18n="injection">输入方式</span><select id="injection-method"><option value="clipboard" data-i18n="clipboard_mode">剪贴板粘贴（推荐）</option><option value="typing" data-i18n="typing_mode">模拟逐字输入</option></select><small data-i18n="injection_hint">粘贴兼容性更好；逐字输入不会使用剪贴板，但速度较慢。</small></label>
+              <label class="field-card switch-card"><span><b data-i18n="restore_clipboard">粘贴后恢复剪贴板</b><small data-i18n="restore_hint">若期间检测到用户复制了新内容，Rain 不会覆盖它。</small></span><input id="restore-clipboard" type="checkbox" /></label>
+            </div>
+            <div class="callout"><span data-i18n="section_safety">安全保护</span><strong data-i18n="target_validation">目标窗口二次校验</strong><p data-i18n="target_hint">录音开始时记录输入位置；识别结束后若位置已变化，结果只复制到剪贴板，不会误写到其他窗口。</p></div>
+          </section>
+
+          <section id="feedback" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_feedback">反馈</div><h1 data-i18n="feedback_title">反馈提示</h1></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="settings-grid">
+              <label class="field-card switch-card"><span><b data-i18n="overlay">显示状态悬浮条</b><small data-i18n="overlay_hint">显示录音音量、时长、模型加载、识别和错误状态。</small></span><input id="show-overlay" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="overlay_fullscreen">全屏应用中也显示</b><small data-i18n="overlay_fullscreen_hint">关闭后，全屏游戏或演示时只使用声音反馈。</small></span><input id="show-overlay-fullscreen" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="start_sound">开始录音提示音</b></span><input id="start-sound" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="stop_sound">结束录音提示音</b></span><input id="stop-sound" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="error_sound">错误提示音</b></span><input id="error-sound" type="checkbox" /></label>
+            </div>
+          </section>
+
+          <section id="privacy" class="page">
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_privacy">隐私</div><h1 data-i18n="privacy_title">隐私与诊断</h1></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="privacy-banner"><strong data-i18n="privacy_banner">默认不上传，不留录音，不留文字历史。</strong><p data-i18n="privacy_detail">诊断事件只记录错误代码、模型 ID 与耗时。导出前会列出文件并由你选择保存位置。</p></div>
+            <div class="settings-grid">
+              <label class="field-card switch-card"><span><b data-i18n="crash_reports">匿名崩溃报告</b><small data-i18n="crash_hint">默认关闭。当前构建只生成本地崩溃标记，不包含音频或识别文字。</small></span><input id="anonymous-crash-reports" type="checkbox" /></label>
+              <div class="field-card"><span data-i18n="diagnostics">诊断工具</span><div class="action-row compact"><button id="export-diagnostics" class="secondary" data-i18n="export_diagnostics">导出诊断包</button><button id="open-logs" class="ghost" data-i18n="open_logs">打开日志目录</button></div><small id="diagnostic-result" aria-live="polite"></small></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="onboarding" class="modal-backdrop" hidden>
+      <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <div class="onboarding-rain"><span></span><span></span><span></span></div>
+        <p class="eyebrow" data-i18n="onboarding_welcome">欢迎使用 Rain氛围输入法</p>
+        <h2 id="onboarding-title" data-i18n="onboarding_title">自动配置本地语音识别</h2>
+        <p data-i18n="onboarding_text">Rain 会先检测显卡并下载匹配的 CPU 或 NVIDIA 推理组件，再下载 SenseVoice Small 模型；全部校验通过后即可使用。</p>
+        <div id="onboarding-system-error" class="onboarding-warning" hidden><strong data-i18n="hotkey_conflict">默认快捷键不可用</strong><span id="onboarding-system-error-detail"></span><button id="fix-hotkey" class="secondary" data-i18n="record_new_hotkey">录制新快捷键</button></div>
+        <div id="onboarding-progress" class="download-progress" hidden><i></i><span>0%</span></div>
+        <div class="onboarding-actions"><button id="onboarding-download" class="primary" data-i18n="download_default">下载并自动配置</button><button id="onboarding-skip" class="ghost" data-i18n="skip">暂时跳过</button></div>
+        <small data-i18n="onboarding_autostart">Rain 默认随 Windows 登录启动并驻留托盘，可随时在通用设置中关闭。</small>
+        <small data-i18n="onboarding_privacy">模型从官方源下载；语音识别始终在本机进行。</small>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="main.js"></script>
+  </body>
+</html>

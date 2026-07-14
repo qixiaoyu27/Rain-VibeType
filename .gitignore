@@ -1,0 +1,13 @@
+/src-tauri/target/
+/src-tauri/gen/
+/node_modules/
+/worker-dist/
+/.venv/
+/.venv-worker/
+/.venv-runtime-*/
+/artifacts/runtimes/
+/build/runtimes/
+/__pycache__/
+*.pyc
+*.pyo
+.DS_Store

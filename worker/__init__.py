@@ -1,0 +1,2 @@
+"""Rain local ASR worker."""
+

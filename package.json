@@ -1,0 +1,14 @@
+{
+  "name": "rain-vibetype",
+  "private": true,
+  "version": "1.0.0",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0"
+  }
+}

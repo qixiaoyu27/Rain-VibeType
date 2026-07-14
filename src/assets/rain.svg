@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Rain">
+  <rect width="128" height="128" rx="30" fill="#08141d"/>
+  <path d="M64 17C50 37 35 52 35 76a29 29 0 0 0 58 0c0-24-15-39-29-59Z" fill="#65d5e4"/>
+  <path d="M48 75c0 11 7 18 17 21" fill="none" stroke="#dffaff" stroke-linecap="round" stroke-width="7" opacity=".9"/>
+</svg>
+
