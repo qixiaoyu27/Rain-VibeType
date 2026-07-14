@@ -27,7 +27,7 @@ use windows_sys::Win32::{
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GetWindowThreadProcessId,
-            IsWindow, MessageBoxW, SetWindowPos, ShowWindow, GUITHREADINFO, HWND_TOPMOST, IDYES,
+            MessageBoxW, SetWindowPos, ShowWindow, GUITHREADINFO, HWND_TOPMOST, IDYES,
             MB_ICONQUESTION, MB_YESNO, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
             SW_HIDE,
         },
@@ -127,7 +127,6 @@ impl Drop for KillOnDropJob {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InputTarget {
     foreground: isize,
-    focus: isize,
     process_id: u32,
 }
 
@@ -153,15 +152,13 @@ impl InputTarget {
             }
             Some(Self {
                 foreground: foreground as isize,
-                focus: info.hwndFocus as isize,
                 process_id,
             })
         }
     }
 
     pub fn is_still_active(self) -> bool {
-        (unsafe { IsWindow(self.foreground as *mut _) != 0 })
-            && input_target_compatible(Some(self), Self::capture())
+        input_target_compatible(Some(self), foreground_process_id())
     }
 
     pub fn is_fullscreen(self) -> bool {
@@ -274,9 +271,19 @@ fn should_restore_clipboard(requested: bool, written_sequence: u32, current_sequ
     requested && written_sequence == current_sequence
 }
 
-fn input_target_compatible(captured: Option<InputTarget>, current: Option<InputTarget>) -> bool {
-    matches!((captured, current), (Some(captured), Some(current))
-        if captured.process_id == current.process_id)
+fn foreground_process_id() -> Option<u32> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.is_null() {
+        return None;
+    }
+    let mut process_id = 0;
+    let thread_id = unsafe { GetWindowThreadProcessId(foreground, &mut process_id) };
+    (thread_id != 0 && process_id != 0).then_some(process_id)
+}
+
+fn input_target_compatible(captured: Option<InputTarget>, current_process_id: Option<u32>) -> bool {
+    matches!((captured, current_process_id), (Some(captured), Some(current))
+        if captured.process_id == current)
 }
 
 fn send_paste() -> Result<(), String> {
@@ -404,22 +411,10 @@ mod tests {
     fn input_target_requires_the_same_process() {
         let first = InputTarget {
             foreground: 1,
-            focus: 2,
             process_id: 3,
         };
-        let changed_control = InputTarget { focus: 4, ..first };
-        let changed_window = InputTarget {
-            foreground: 4,
-            ..first
-        };
-        let changed_process = InputTarget {
-            process_id: 5,
-            ..first
-        };
-        assert!(input_target_compatible(Some(first), Some(first)));
-        assert!(input_target_compatible(Some(first), Some(changed_control)));
-        assert!(input_target_compatible(Some(first), Some(changed_window)));
-        assert!(!input_target_compatible(Some(first), Some(changed_process)));
+        assert!(input_target_compatible(Some(first), Some(3)));
+        assert!(!input_target_compatible(Some(first), Some(5)));
         assert!(!input_target_compatible(Some(first), None));
     }
 }
