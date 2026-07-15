@@ -38,10 +38,39 @@ Context:
 - The design requires complete clipboard preservation and concurrent-change protection.
 
 Rationale:
-- An OLE `IDataObject` snapshot preserves non-text and multi-format clipboard contents, while sequence-number checks avoid overwriting a user's later copy.
+- Per-format deep copies preserve non-text and multi-format clipboard contents independently of the live clipboard owner, while sequence-number checks avoid overwriting a user's later copy.
 
 Consequences:
 - Target changes or injection failures leave the complete recognition result in the clipboard without reclaiming focus.
+
+## 2026-07-15 — Capture the input target before helper processes
+
+Decision:
+- Capture the foreground process as the first hotkey action, accept it without requiring `GetGUIThreadInfo.hwndFocus`, and run the cached NVIDIA probe with `CREATE_NO_WINDOW`.
+
+Context:
+- Diagnostics repeatedly ended in `INPUT_TARGET_CHANGED`; the external review identified synchronous `nvidia-smi` execution in the hotkey path, and the remaining initial `hwndFocus` gate could discard valid Chromium/Electron targets.
+
+Rationale:
+- The foreground process is the stable safety boundary. Runtime probes must not race with or visibly disturb target capture.
+
+Consequences:
+- Injection remains blocked after a real application switch, but valid modern controls no longer fall back to clipboard merely because Win32 omits a focused child HWND.
+- NVIDIA detection runs once per application process without creating a console window.
+
+## 2026-07-15 — Make system playback ducking opt-in
+
+Decision:
+- Add a disabled-by-default recording setting that reduces the Windows default playback endpoint to 20% of its prior master volume and restores it through a recording-scoped guard.
+
+Context:
+- Playback captured acoustically by the microphone can reduce recognition quality; the user requested a settings switch rather than unconditional volume changes.
+
+Rationale:
+- Windows Core Audio provides the smallest native implementation and does not alter microphone gain.
+
+Consequences:
+- Normal stop, cancellation, and handled recording failures restore the saved volume; existing configurations keep the feature off until explicitly enabled.
 
 ## 2026-07-14 — Constrain Worker and model filesystem boundaries
 
@@ -144,3 +173,51 @@ Rationale:
 Consequences:
 - A GitHub Release must contain `latest.json`, `models.json`, `runtime-manifest.json`, and both runtime ZIPs before those URLs become usable.
 - The existing Tauri identifier remains unchanged so current configuration and downloaded models are preserved.
+
+## 2026-07-15 — Amend the future platform scope
+
+Decision:
+- Keep Windows 11 x64 on Intel/AMD CPUs as the baseline, treat NVIDIA GPUs through CUDA as optional acceleration, and include macOS on Apple Silicon in the preliminary multi-platform scope. NVIDIA CPUs are not included.
+
+Context:
+- Initial use suggests the primary model may already be fast enough on CPU, and the product now has a preliminary cross-platform compatibility requirement.
+
+Rationale:
+- A CPU-capable baseline covers Intel and AMD Windows systems and gives the macOS port a portable starting point without making NVIDIA hardware mandatory.
+
+Consequences:
+- The current Windows V1 remains the implemented release; the earlier statement that Apple Silicon is outside all future scope is superseded.
+- CPU sufficiency must be confirmed with repeatable latency and memory benchmarks before removing CUDA support or choosing a replacement inference runtime.
+- Do not quantize or convert the current SenseVoice model merely to reduce size or improve speed; retain the existing FunASR/PyTorch path unless a concrete cross-platform packaging or compatibility problem justifies a runtime migration.
+
+## 2026-07-15 — Stage the native SenseVoice runtime behind a parity gate
+
+Decision:
+- Keep the current SenseVoice weights and add an unquantized ONNX export plus a Rust/sherpa-onnx CPU Worker that implements the existing IPC contract.
+- Keep Python/FunASR as the active fallback and do not add the native component to the production runtime manifest until corpus-level output checks pass.
+
+Context:
+- The product needs Intel/AMD Windows and Apple Silicon compatibility without bundling PyTorch, while the existing model is already fast enough and should not be replaced or quantized.
+
+Rationale:
+- Reusing the Worker protocol isolates the runtime migration from recording, hotkey, tray, and text-injection code. A small native runtime reduces framework packaging while retaining a reversible baseline for recognition quality.
+
+Consequences:
+- The native CPU runtime ZIP is about 6.7 MiB, but the external unquantized ONNX model remains about 894 MiB.
+- Runtime publication also needs official `model.onnx` and `tokens.txt` artifacts; local export alone is not a clean-machine distribution strategy.
+- A one-sample comparison produced different Chinese text in one word, so production selection remains unchanged pending a representative speech corpus.
+
+## 2026-07-15 — Use a neutral high-contrast interface with local theme persistence
+
+Decision:
+- Replace the teal glow/grid visual language with a ChatGPT-like neutral black-and-white system and support explicit dark/light switching from the title bar.
+
+Context:
+- The user requested a higher-contrast interface with both dark and light modes.
+
+Rationale:
+- Semantic neutral CSS variables keep all current pages consistent without changing business markup or backend configuration.
+
+Consequences:
+- The first render follows the operating-system color preference unless `rain-theme` is already stored locally; an explicit selection persists across reloads.
+- Error red remains available only for destructive or failed states; ordinary navigation, cards, controls, and progress surfaces stay neutral.

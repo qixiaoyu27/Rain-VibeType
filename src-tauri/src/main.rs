@@ -93,6 +93,7 @@ struct Runtime {
     phase: Phase,
     request_id: Option<String>,
     recording: Option<audio::Recording>,
+    system_audio_ducker: Option<platform_windows::SystemAudioDucker>,
     target: Option<InputTarget>,
     pending_text: Option<String>,
     model_load_error: Option<String>,
@@ -104,6 +105,7 @@ impl Default for Runtime {
             phase: Phase::Idle,
             request_id: None,
             recording: None,
+            system_audio_ducker: None,
             target: None,
             pending_text: None,
             model_load_error: None,
@@ -211,28 +213,38 @@ fn save_config(
             return Err(message);
         }
     }
+    let autostart_needs_update = config.autostart != previous.autostart
+        || !state
+            .system_status
+            .lock()
+            .map_err(|_| "系统状态损坏")?
+            .autostart_ready;
     let autostart = app.autolaunch();
-    let autostart_result = if config.autostart {
-        autostart.enable()
-    } else {
-        autostart.disable()
-    };
-    if let Err(error) = autostart_result {
-        if shortcut_needs_registration {
-            let _ = app.global_shortcut().unregister(config.hotkey.as_str());
-        }
-        if let Ok(mut status) = state.system_status.lock() {
-            status.autostart_ready = false;
-            status.autostart_error = Some(error.to_string());
-        }
-        return Err(format!("无法更新开机启动设置：{error}"));
-    }
-    if let Err(error) = config::save(&state.config_path, &config) {
-        let _ = if previous.autostart {
+    if autostart_needs_update {
+        let result = if config.autostart {
             autostart.enable()
         } else {
             autostart.disable()
         };
+        if let Err(error) = result {
+            if shortcut_needs_registration {
+                let _ = app.global_shortcut().unregister(config.hotkey.as_str());
+            }
+            if let Ok(mut status) = state.system_status.lock() {
+                status.autostart_ready = false;
+                status.autostart_error = Some(error.to_string());
+            }
+            return Err(format!("无法更新开机启动设置：{error}"));
+        }
+    }
+    if let Err(error) = config::save(&state.config_path, &config) {
+        if autostart_needs_update {
+            let _ = if previous.autostart {
+                autostart.enable()
+            } else {
+                autostart.disable()
+            };
+        }
         if shortcut_needs_registration {
             let _ = app.global_shortcut().unregister(config.hotkey.as_str());
         }
@@ -250,12 +262,16 @@ fn save_config(
     let model_changed = config.model_path != previous.model_path
         || config.device_preference != previous.device_preference
         || config.selected_model_id != previous.selected_model_id;
+    let tray_changed = config.ui_language != previous.ui_language
+        || config.selected_model_id != previous.selected_model_id;
     *state.config.lock().map_err(|_| "配置状态损坏")? = config.clone();
     configure_worker_runtime(&state, &config)?;
     if model_changed {
         reload_selected_model(&app);
     }
-    let _ = setup_tray(&app);
+    if tray_changed {
+        let _ = setup_tray(&app);
+    }
     Ok(config)
 }
 
@@ -774,6 +790,9 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 }
 
 fn start_recording(app: &AppHandle) -> Result<(), String> {
+    // Capture the user's foreground application before any runtime checks can
+    // launch helper processes or touch the window manager.
+    let target = InputTarget::capture();
     let state = app.state::<AppState>();
     state.unload_epoch.fetch_add(1, Ordering::Relaxed);
     {
@@ -864,7 +883,6 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
     }
     let adapter_type = current_adapter(&state, &config)?;
 
-    let target = InputTarget::capture();
     let request_id = uuid::Uuid::new_v4().to_string();
     let recording = match audio::Recording::start(config.input_device.as_deref()) {
         Ok(recording) => recording,
@@ -894,12 +912,39 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
             return Err(format!("{code}：{error}"));
         }
     };
+    let system_audio_ducker = if config.duck_system_audio {
+        match platform_windows::SystemAudioDucker::activate() {
+            Ok(ducker) => Some(ducker),
+            Err(error) => {
+                state.diagnostics.record(
+                    "SYSTEM_AUDIO_DUCK_FAILED",
+                    &config.selected_model_id,
+                    None,
+                    None,
+                );
+                ephemeral(
+                    app,
+                    "failed",
+                    text(
+                        config_uses_english(&config),
+                        "无法降低电脑声音",
+                        "Could not lower PC audio",
+                    ),
+                    &error,
+                );
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     {
         let mut runtime = state.runtime.lock().map_err(|_| "运行状态损坏")?;
         runtime.phase = Phase::Recording;
         runtime.request_id = Some(request_id.clone());
         runtime.target = target;
         runtime.recording = Some(recording);
+        runtime.system_audio_ducker = system_audio_ducker;
         runtime.model_load_error = None;
     }
 
@@ -950,7 +995,7 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
 
 fn stop_recording(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let (request_id, target, recording, config, adapter_type) = {
+    let (request_id, target, recording, system_audio_ducker, config, adapter_type) = {
         let mut runtime = state.runtime.lock().map_err(|_| "运行状态损坏")?;
         if runtime.phase != Phase::Recording {
             return Ok(());
@@ -959,10 +1004,19 @@ fn stop_recording(app: &AppHandle) -> Result<(), String> {
         let request_id = runtime.request_id.clone().ok_or("录音任务丢失")?;
         let target = runtime.target;
         let recording = runtime.recording.take().ok_or("录音缓冲丢失")?;
+        let system_audio_ducker = runtime.system_audio_ducker.take();
         let config = state.config.lock().map_err(|_| "配置状态损坏")?.clone();
         let adapter_type = current_adapter(&state, &config)?;
-        (request_id, target, recording, config, adapter_type)
+        (
+            request_id,
+            target,
+            recording,
+            system_audio_ducker,
+            config,
+            adapter_type,
+        )
     };
+    drop(system_audio_ducker);
 
     let pcm = match recording.finish() {
         Ok(pcm) => pcm,
@@ -1163,6 +1217,7 @@ fn cancel(app: &AppHandle) -> Result<(), String> {
         }
         let request_id = runtime.request_id.take().unwrap_or_default();
         runtime.recording = None;
+        runtime.system_audio_ducker = None;
         runtime.target = None;
         runtime.model_load_error = None;
         runtime.phase = Phase::Idle;
@@ -1227,6 +1282,7 @@ fn reset_task(app: &AppHandle, request_id: &str) {
         if runtime.request_id.as_deref() == Some(request_id) {
             runtime.request_id = None;
             runtime.recording = None;
+            runtime.system_audio_ducker = None;
             runtime.target = None;
             runtime.model_load_error = None;
             runtime.phase = Phase::Idle;
@@ -1698,6 +1754,9 @@ fn main() {
                         .unwrap_or_else(|_| "push_to_talk".into());
                     match (mode.as_str(), event.state) {
                         ("push_to_talk", ShortcutState::Pressed) => {
+                            if recording {
+                                return;
+                            }
                             let _ = start_recording(app);
                         }
                         ("push_to_talk", ShortcutState::Released) => {

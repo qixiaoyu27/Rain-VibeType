@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rain氛围输入法</title>
+    <script>
+      const savedTheme = localStorage.getItem("rain-theme");
+      document.documentElement.dataset.theme = savedTheme === "light" || savedTheme === "dark"
+        ? savedTheme
+        : (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -14,6 +20,11 @@
           <span>RAIN</span><small data-i18n="brand_subtitle">氛围输入法 · RAIN-VIBETYPE</small>
         </div>
         <div class="window-actions">
+          <button id="theme-toggle" class="theme-button" type="button">
+            <svg class="theme-icon sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+            <svg class="theme-icon moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path></svg>
+            <span id="theme-label">浅色模式</span>
+          </button>
           <button id="minimize" class="chrome-button" aria-label="最小化">—</button>
           <button id="close" class="chrome-button close" aria-label="关闭">×</button>
         </div>
@@ -71,6 +82,7 @@
               <div class="field-card"><span data-i18n="hotkey">全局快捷键</span><button id="hotkey-recorder" class="key-recorder" type="button">Ctrl + Shift + Space</button><small data-i18n="hotkey_hint">点击后按下新的组合键；注册失败会自动保留旧快捷键。</small></div>
               <label class="field-card"><span data-i18n="duration">最长录音时长（秒）</span><input id="max-recording-seconds" type="number" min="10" max="3600" step="1" list="duration-presets" /><datalist id="duration-presets"><option value="30"></option><option value="60"></option><option value="180"></option><option value="300"></option></datalist></label>
               <label class="field-card"><span data-i18n="input_device">输入设备</span><select id="input-device"></select></label>
+              <label class="field-card switch-card"><span><b data-i18n="duck_system_audio">录音时降低电脑声音</b><small data-i18n="duck_system_audio_hint">开启后，录音期间系统播放音量会降至原来的 20%，结束后自动恢复。</small></span><input id="duck-system-audio" type="checkbox" /></label>
               <div class="field-card wide mic-test"><span data-i18n="mic_test">麦克风测试</span><div class="meter"><i id="mic-meter"></i></div><button id="test-mic" class="secondary" data-i18n="test_500ms">测试 0.5 秒</button><small id="mic-result" aria-live="polite"></small></div>
             </div>
           </section>

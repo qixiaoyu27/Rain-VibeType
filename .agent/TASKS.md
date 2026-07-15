@@ -1,5 +1,17 @@
 # Tasks
 
+- [ ] Validate the preliminary cross-platform inference matrix.
+  - Context: CPU performance appears promising but needs repeatable latency and memory measurements on Intel/AMD Windows 11 and Apple Silicon macOS, with NVIDIA CUDA retained as an optional comparison path.
+  - Location: `worker/`, `src-tauri/src/runtimes.rs`, `docs/WINDOWS_ACCEPTANCE.md`.
+  - Source: Preliminary multi-platform product requirement added on 2026-07-15.
+- [ ] Gate the native SenseVoice runtime with a representative parity corpus.
+  - Context: The native path is materially faster on one official sample but differs from Python/FunASR by one Chinese word; one sample cannot establish accuracy.
+  - Location: `native-worker/`, `scripts/compare-workers.py`, `worker/rain_worker.py`.
+  - Source: Native CPU vertical-slice benchmark on 2026-07-15.
+- [ ] Publish verified native model artifacts before enabling the native runtime.
+  - Context: Clean installations need official Rain-hosted `model.onnx` and `tokens.txt` hashes; production must not require users to install Python and export locally.
+  - Location: `worker/export_sensevoice_onnx.py`, `scripts/build-native-runtime.ps1`, runtime/model release manifests.
+  - Source: Staged native runtime decision on 2026-07-15.
 - [ ] Run the real-model Windows acceptance matrix.
   - Context: Automated adapter tests use simulated models and cannot prove real framework/model compatibility or output quality.
   - Location: `docs/WINDOWS_ACCEPTANCE.md`, `worker/`, `src-tauri/src/worker.rs`.

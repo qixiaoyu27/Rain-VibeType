@@ -6,6 +6,7 @@ use std::{
     io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
+    sync::OnceLock,
     time::Duration,
 };
 use zip::ZipArchive;
@@ -337,11 +338,22 @@ fn component_for_accelerator<'a>(
 }
 
 fn detect_nvidia() -> (bool, Option<String>) {
-    let output = Command::new("nvidia-smi")
+    static NVIDIA: OnceLock<(bool, Option<String>)> = OnceLock::new();
+    NVIDIA.get_or_init(probe_nvidia).clone()
+}
+
+fn probe_nvidia() -> (bool, Option<String>) {
+    let mut command = Command::new("nvidia-smi");
+    command
         .args(["--query-gpu=name", "--format=csv,noheader"])
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output();
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = command.output();
     let Ok(output) = output else {
         return (false, None);
     };

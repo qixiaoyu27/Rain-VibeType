@@ -1,0 +1,11 @@
+[package]
+name = "rain-native-worker"
+version = "0.1.0"
+description = "Native SenseVoice inference worker for Rain-Vibetype"
+license = "AGPL-3.0-only"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sherpa-onnx = "1.13.4"

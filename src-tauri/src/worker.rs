@@ -230,7 +230,7 @@ impl WorkerClient {
             Err(error) => {
                 self.note_crash();
                 return Err(format!(
-                    "无法启动 Python Worker（{}）：{error}",
+                    "无法启动推理 Worker（{}）：{error}",
                     executable.display()
                 ));
             }

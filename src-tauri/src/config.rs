@@ -14,6 +14,7 @@ pub struct Config {
     pub hotkey: String,
     pub max_recording_seconds: u64,
     pub input_device: Option<String>,
+    pub duck_system_audio: bool,
     pub selected_model_id: String,
     pub model_path: String,
     pub model_storage_dir: Option<String>,
@@ -45,6 +46,7 @@ impl Default for Config {
             hotkey: "Ctrl+Shift+Space".into(),
             max_recording_seconds: 60,
             input_device: None,
+            duck_system_audio: false,
             selected_model_id: String::new(),
             model_path: String::new(),
             model_storage_dir: None,
@@ -225,6 +227,7 @@ mod tests {
         assert_eq!(config.hotkey, "Ctrl+Shift+Space");
         assert_eq!(config.injection_method, "clipboard");
         assert_eq!(config.ui_language, "zh-CN");
+        assert!(!config.duck_system_audio);
         assert!(config.autostart);
         assert!(config.validate().is_ok());
     }
