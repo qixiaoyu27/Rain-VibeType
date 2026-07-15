@@ -3,7 +3,7 @@
 Updated: 2026-07-15
 
 - Windows 11 x64 application code is at version `1.0.0`, is branded `Rain氛围输入法` / `Rain-Vibetype`, and defaults to Simplified Chinese.
-- The complete source tree is published on GitHub `main`; the source publication commit is `38b32946e4c43e5ff015d54274396a5fc36c9b51`.
+- The complete current source tree is published on GitHub `main`.
 - The full Windows feature surface from the design document is implemented: tray/hotkey/overlay, in-memory capture, safe target handling, clipboard and typing output, three ASR adapters, model repository, resource policies, autostart, updater, diagnostics, and optional crash reports.
 - First launch now detects hardware and, after one explicit click, installs the matching CPU/NVIDIA inference component before SenseVoice Small. Neither transfer starts silently.
 - Automated verification currently passes: 22 Tauri Rust tests with one live-network test ignored, 1 native-Worker Rust test, native Clippy, 4 Python Worker tests, frontend syntax checks, and all four release/export script AST checks.
