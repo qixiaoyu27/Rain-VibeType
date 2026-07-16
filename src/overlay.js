@@ -1,33 +1,42 @@
-const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const overlay = document.getElementById("overlay");
 const title = document.getElementById("overlay-title");
 const detail = document.getElementById("overlay-detail");
-const cancel = document.getElementById("overlay-cancel");
+const bars = [...overlay.querySelectorAll(".overlay-icon i")];
+const levelHistory = Array(bars.length).fill(0);
 
-async function localizeCancelWhenReady() {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      const config = await invoke("get_config");
-      const english = config.ui_language === "en" || (config.ui_language === "system" && !navigator.language.toLowerCase().startsWith("zh"));
-      cancel.innerHTML = english ? "Esc&nbsp;&nbsp;Cancel" : "Esc&nbsp;&nbsp;取消";
-      cancel.setAttribute("aria-label", english ? "Cancel" : "取消");
-      return;
-    } catch (error) {
-      if (!String(error).includes("state not managed")) return;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+function normalizedAudioLevel(level) {
+  return Math.min(1, Math.sqrt(Math.max(0, Number(level) || 0)) * 2.4);
 }
 
-localizeCancelWhenReady();
+console.assert(normalizedAudioLevel(-1) === 0 && normalizedAudioLevel(1) === 1);
+
+function syncTheme() {
+  document.documentElement.dataset.theme = localStorage.getItem("rain-theme") || "light";
+}
+
+syncTheme();
+window.addEventListener("storage", syncTheme);
 
 listen("overlay-status", ({ payload }) => {
+  syncTheme();
   overlay.dataset.state = payload.state;
-  const level = Math.max(0.08, Math.min(1, payload.level || 0.08));
-  overlay.style.setProperty("--level-height", `${6 + level * 22}px`);
+  overlay.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.68));
+  if (payload.state === "recording") {
+    const level = normalizedAudioLevel(payload.level);
+    levelHistory.push(level);
+    levelHistory.shift();
+    bars.forEach((bar, index) => {
+      bar.style.height = `${6 + levelHistory[index] * 24}px`;
+      bar.style.opacity = String(.55 + levelHistory[index] * .45);
+    });
+  } else {
+    levelHistory.fill(0);
+    bars.forEach((bar) => {
+      bar.style.height = "5px";
+      bar.style.opacity = "1";
+    });
+  }
   title.textContent = payload.title;
   detail.textContent = payload.detail || "";
 });
-
-cancel.addEventListener("click", () => invoke("cancel_current"));

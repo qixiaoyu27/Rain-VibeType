@@ -2,6 +2,7 @@ use reqwest::{blocking::Client, header::RANGE, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -10,6 +11,10 @@ use std::{
 use zip::ZipArchive;
 
 const MODELSCOPE_USER_AGENT: &str = concat!("RainVibetype/", env!("CARGO_PKG_VERSION"));
+
+fn manifest_is_unpublished(status: StatusCode) -> bool {
+    status == StatusCode::NOT_FOUND
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ModelManifest {
@@ -24,6 +29,10 @@ pub struct ModelDefinition {
     pub display_name: String,
     pub engine: String,
     pub adapter_type: String,
+    #[serde(default = "default_model_purpose")]
+    pub purpose: String,
+    #[serde(default)]
+    pub runtime: ModelRuntimeDependency,
     pub repository_id: String,
     pub revision: String,
     pub model_version: String,
@@ -39,11 +48,32 @@ pub struct ModelDefinition {
     pub files: Vec<ModelFile>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ModelRuntimeDependency {
+    pub repository: String,
+    pub components: BTreeMap<String, String>,
+}
+
+impl ModelRuntimeDependency {
+    pub fn component_for(&self, accelerator: &str) -> Option<&str> {
+        self.components
+            .get(accelerator)
+            .or_else(|| self.components.get("cpu"))
+            .map(String::as_str)
+    }
+
+    pub fn uses(&self, component_id: &str) -> bool {
+        self.components.values().any(|id| id == component_id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ModelFile {
     pub path: String,
     pub size: u64,
     pub sha256: String,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -93,11 +123,17 @@ impl ModelRepository {
             serde_json::from_str(include_str!("../resources/models.json"))
                 .map_err(|error| format!("模型清单无效：{error}"))?;
         validate_manifest(&embedded)?;
-        let manifest = fs::read(root.join(".models-manifest.json"))
+        let mut manifest = fs::read(root.join(".models-manifest.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<ModelManifest>(&bytes).ok())
             .filter(|manifest| validate_manifest(manifest).is_ok())
-            .unwrap_or(embedded);
+            .filter(|manifest| manifest.manifest_version >= embedded.manifest_version)
+            .unwrap_or_else(|| embedded.clone());
+        for model in embedded.models {
+            if !manifest.models.iter().any(|current| current.id == model.id) {
+                manifest.models.push(model);
+            }
+        }
         Ok(Self { manifest, root })
     }
 
@@ -130,7 +166,11 @@ impl ModelRepository {
             .map_err(|error| error.to_string())?
             .get(url)
             .send()
-            .map_err(|error| format!("无法检查模型更新：{error}"))?
+            .map_err(|error| format!("无法检查模型更新：{error}"))?;
+        if manifest_is_unpublished(response.status()) {
+            return Ok(false);
+        }
+        let response = response
             .error_for_status()
             .map_err(|error| format!("无法检查模型更新：{error}"))?;
         if response
@@ -207,6 +247,32 @@ impl ModelRepository {
                     },
                     previous_versions,
                 }
+            })
+            .collect()
+    }
+
+    pub fn models_using_runtime(&self, component_id: &str) -> Vec<String> {
+        self.list()
+            .into_iter()
+            .filter_map(|card| {
+                if !matches!(
+                    card.state.as_str(),
+                    "installed" | "custom" | "update_available"
+                ) {
+                    return None;
+                }
+                let installed_definition = card
+                    .installed_path
+                    .as_deref()
+                    .and_then(|path| read_marker(Path::new(path)))
+                    .and_then(|marker| marker.definition)
+                    .filter(|definition| !definition.runtime.components.is_empty());
+                installed_definition
+                    .as_ref()
+                    .unwrap_or(&card.definition)
+                    .runtime
+                    .uses(component_id)
+                    .then_some(card.definition.id)
             })
             .collect()
     }
@@ -522,8 +588,8 @@ impl ModelRepository {
 }
 
 fn validate_manifest(manifest: &ModelManifest) -> Result<(), String> {
-    if manifest.schema_version != 1 || manifest.models.len() != 3 {
-        return Err("模型清单必须包含三个受支持模型且使用 schema_version 1".into());
+    if manifest.schema_version != 2 || manifest.models.len() < 3 {
+        return Err("模型清单必须包含基础语音模型且使用 schema_version 2".into());
     }
     let mut ids = std::collections::HashSet::new();
     for model in &manifest.models {
@@ -536,17 +602,48 @@ fn validate_manifest(manifest: &ModelManifest) -> Result<(), String> {
         {
             return Err(format!("模型清单包含无效或重复 ID：{}", model.id));
         }
-        let expected_adapter = match model.id.as_str() {
-            "sensevoice-small" => "sensevoice",
-            "fun-asr-nano" => "fun_asr_nano",
-            "paraformer-zh" => "paraformer_zh",
-            _ => return Err(format!("模型清单包含不受支持的模型：{}", model.id)),
+        let expected = match model.id.as_str() {
+            "sensevoice-small" => Some(("sensevoice", "asr")),
+            "fun-asr-nano" => Some(("fun_asr_nano", "asr")),
+            "paraformer-zh" => Some(("paraformer_zh", "asr")),
+            "streaming-zipformer-preview" => Some(("streaming_zipformer", "asr_preview")),
+            "qwen3-0-6b-text" => Some(("text_polish", "text_polish")),
+            _ => None,
         };
-        if model.adapter_type != expected_adapter || model.files.is_empty() {
+        if model.adapter_type.trim().is_empty()
+            || !matches!(
+                model.purpose.as_str(),
+                "asr" | "asr_preview" | "text_polish"
+            )
+            || model.files.is_empty()
+            || expected.is_some_and(|(adapter, purpose)| {
+                model.adapter_type != adapter || model.purpose != purpose
+            })
+        {
             return Err(format!("模型 {} 的适配器或文件清单无效", model.id));
+        }
+        if !matches!(model.runtime.repository.as_str(), "speech" | "text")
+            || model.runtime.components.is_empty()
+            || model
+                .runtime
+                .components
+                .iter()
+                .any(|(accelerator, component_id)| {
+                    !matches!(accelerator.as_str(), "cpu" | "nvidia")
+                        || !safe_identifier(component_id)
+                })
+        {
+            return Err(format!("模型 {} 的推理组件映射无效", model.id));
         }
         for file in &model.files {
             path_from_manifest(&file.path)?;
+            if file.url.as_deref().is_some_and(|url| {
+                Url::parse(url)
+                    .map(|url| url.scheme() != "https")
+                    .unwrap_or(true)
+            }) {
+                return Err(format!("模型 {} 包含无效的文件下载地址", model.id));
+            }
             if file.size == 0
                 || file.sha256.len() != 64
                 || !file.sha256.chars().all(|value| value.is_ascii_hexdigit())
@@ -555,7 +652,23 @@ fn validate_manifest(manifest: &ModelManifest) -> Result<(), String> {
             }
         }
     }
+    for required in ["sensevoice-small", "fun-asr-nano", "paraformer-zh"] {
+        if !ids.contains(required) {
+            return Err(format!("模型清单缺少基础语音模型：{required}"));
+        }
+    }
     Ok(())
+}
+
+fn default_model_purpose() -> String {
+    "asr".into()
+}
+
+fn safe_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
 }
 
 fn read_marker(path: &Path) -> Option<InstallMarker> {
@@ -667,14 +780,19 @@ fn download_file(
         fs::remove_file(part).map_err(|error| error.to_string())?;
         existing = 0;
     }
-    let mut url = Url::parse(&format!(
-        "https://modelscope.cn/api/v1/models/{}/repo",
-        model.repository_id
-    ))
-    .map_err(|error| error.to_string())?;
-    url.query_pairs_mut()
-        .append_pair("Revision", &model.revision)
-        .append_pair("FilePath", &file.path);
+    let url = if let Some(url) = &file.url {
+        Url::parse(url).map_err(|error| error.to_string())?
+    } else {
+        let mut url = Url::parse(&format!(
+            "https://modelscope.cn/api/v1/models/{}/repo",
+            model.repository_id
+        ))
+        .map_err(|error| error.to_string())?;
+        url.query_pairs_mut()
+            .append_pair("Revision", &model.revision)
+            .append_pair("FilePath", &file.path);
+        url
+    };
     let mut request = client.get(url);
     if existing > 0 {
         request = request.header(RANGE, format!("bytes={existing}-"));
@@ -856,6 +974,11 @@ mod tests {
             display_name: "Tiny".into(),
             engine: "test".into(),
             adapter_type: "test".into(),
+            purpose: "asr".into(),
+            runtime: ModelRuntimeDependency {
+                repository: "speech".into(),
+                components: BTreeMap::from([("cpu".into(), "test-runtime".into())]),
+            },
             repository_id: "test/tiny".into(),
             revision: "main".into(),
             model_version: "1".into(),
@@ -872,6 +995,7 @@ mod tests {
                 path: "weights.bin".into(),
                 size: 10,
                 sha256: hash.into(),
+                url: None,
             }],
         }
     }
@@ -885,16 +1009,108 @@ mod tests {
     }
 
     #[test]
-    fn embedded_manifest_is_versioned_and_has_three_models() {
+    fn missing_release_manifest_is_not_a_model_update_error() {
+        assert!(manifest_is_unpublished(StatusCode::NOT_FOUND));
+        assert!(!manifest_is_unpublished(StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    #[test]
+    fn embedded_manifest_is_versioned_and_has_optional_text_model() {
         let repository = ModelRepository::new(PathBuf::from("models")).unwrap();
-        assert_eq!(repository.manifest.schema_version, 1);
-        assert_eq!(repository.manifest.models.len(), 3);
+        assert_eq!(repository.manifest.schema_version, 2);
+        assert_eq!(repository.manifest.models.len(), 5);
+        assert_eq!(
+            repository.definition("qwen3-0-6b-text").unwrap().purpose,
+            "text_polish"
+        );
+        let sensevoice = repository.definition("sensevoice-small").unwrap();
+        assert_eq!(sensevoice.engine, "sherpa-onnx");
+        assert_eq!(
+            sensevoice
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            ["model.onnx", "tokens.txt"]
+        );
+        assert_eq!(
+            repository
+                .definition("streaming-zipformer-preview")
+                .unwrap()
+                .purpose,
+            "asr_preview"
+        );
         assert!(repository
             .manifest
             .models
             .iter()
             .all(|model| !model.files.is_empty()
                 && model.files.iter().all(|file| file.sha256.len() == 64)));
+        assert_eq!(
+            repository
+                .definition("sensevoice-small")
+                .unwrap()
+                .runtime
+                .component_for("nvidia"),
+            Some("rain-runtime-onnx-cpu")
+        );
+        for model_id in ["fun-asr-nano", "paraformer-zh"] {
+            assert_eq!(
+                repository
+                    .definition(model_id)
+                    .unwrap()
+                    .runtime
+                    .component_for("cpu"),
+                Some("rain-runtime-cpu")
+            );
+            assert_eq!(
+                repository
+                    .definition(model_id)
+                    .unwrap()
+                    .runtime
+                    .component_for("nvidia"),
+                Some("rain-runtime-nvidia")
+            );
+        }
+    }
+
+    #[test]
+    fn shared_runtime_stays_referenced_until_the_last_model_is_deleted() {
+        let root = std::env::temp_dir().join(format!("rain-runtime-refs-{}", uuid::Uuid::new_v4()));
+        let repository = ModelRepository::new(root.clone()).unwrap();
+        for model_id in ["fun-asr-nano", "paraformer-zh"] {
+            let definition = repository.definition(model_id).unwrap().clone();
+            let path = repository.install_path(&definition);
+            fs::create_dir_all(&path).unwrap();
+            let marker = InstallMarker {
+                schema_version: 1,
+                manifest_version: repository.manifest.manifest_version.clone(),
+                model_id: definition.id.clone(),
+                model_version: definition.model_version.clone(),
+                verified: true,
+                definition: Some(definition),
+            };
+            fs::write(
+                path.join(".rain-model.json"),
+                serde_json::to_vec(&marker).unwrap(),
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            repository.models_using_runtime("rain-runtime-cpu"),
+            ["fun-asr-nano", "paraformer-zh"]
+        );
+        repository.delete("fun-asr-nano").unwrap();
+        assert_eq!(
+            repository.models_using_runtime("rain-runtime-cpu"),
+            ["paraformer-zh"]
+        );
+        repository.delete("paraformer-zh").unwrap();
+        assert!(repository
+            .models_using_runtime("rain-runtime-cpu")
+            .is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -942,12 +1158,14 @@ mod tests {
 
         let mut next_manifest = embedded.manifest.clone();
         next_manifest.manifest_version = "future-catalog".into();
-        next_manifest
+        let next_definition = next_manifest
             .models
             .iter_mut()
             .find(|model| model.id == old_definition.id)
-            .unwrap()
-            .model_version = "future-model".into();
+            .unwrap();
+        next_definition.model_version = "future-model".into();
+        next_definition.runtime.components =
+            BTreeMap::from([("cpu".into(), "future-runtime".into())]);
         fs::write(
             root.join(".models-manifest.json"),
             serde_json::to_vec(&next_manifest).unwrap(),
@@ -966,6 +1184,11 @@ mod tests {
             updated.installed_path(&card.definition.id).unwrap(),
             old_path
         );
+        assert_eq!(
+            updated.models_using_runtime("rain-runtime-onnx-cpu"),
+            ["sensevoice-small"]
+        );
+        assert!(updated.models_using_runtime("future-runtime").is_empty());
         updated
             .delete_previous_versions(&card.definition.id)
             .unwrap();
@@ -977,7 +1200,7 @@ mod tests {
     #[ignore = "requires live ModelScope network access"]
     fn live_modelscope_large_file_range_request_works() {
         let repository = ModelRepository::new(PathBuf::from("models")).unwrap();
-        let model = repository.definition("sensevoice-small").unwrap();
+        let model = repository.definition("fun-asr-nano").unwrap();
         let file = model
             .files
             .iter()

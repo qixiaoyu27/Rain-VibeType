@@ -101,6 +101,13 @@ impl Recording {
         self.error.lock().ok()?.take()
     }
 
+    pub fn preview_chunk(&self, cursor: &mut usize) -> (u32, Vec<i16>) {
+        let Ok(samples) = self.samples.lock() else {
+            return (self.sample_rate, Vec::new());
+        };
+        (self.sample_rate, pcm16_chunk(&samples, cursor))
+    }
+
     pub fn finish(self) -> Result<Vec<i16>, String> {
         drop(self.stream);
         if let Some(error) = self.error.lock().map_err(|_| "录音状态损坏")?.take() {
@@ -186,6 +193,16 @@ fn resample_to_16khz(input: &[f32], input_rate: u32) -> Vec<i16> {
     output
 }
 
+fn pcm16_chunk(samples: &[f32], cursor: &mut usize) -> Vec<i16> {
+    *cursor = (*cursor).min(samples.len());
+    let output = samples[*cursor..]
+        .iter()
+        .map(|sample| (sample.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+        .collect();
+    *cursor = samples.len();
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +214,13 @@ mod tests {
         assert!(output
             .iter()
             .all(|sample| *sample > 8_000 && *sample < 8_300));
+    }
+
+    #[test]
+    fn preview_chunks_only_return_new_samples() {
+        let mut cursor = 0;
+        assert_eq!(pcm16_chunk(&[0.0, 0.5], &mut cursor), [0, 16_383]);
+        assert!(pcm16_chunk(&[0.0, 0.5], &mut cursor).is_empty());
+        assert_eq!(pcm16_chunk(&[0.0, 0.5, -0.5], &mut cursor), [-16_383]);
     }
 }

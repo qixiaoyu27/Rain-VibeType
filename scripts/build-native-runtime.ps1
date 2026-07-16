@@ -1,5 +1,5 @@
 param(
-    [string]$RuntimeVersion = "0.1.0",
+    [string]$RuntimeVersion = "1.1.0",
     [string]$ArtifactBaseUrl = "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download",
     [string]$OutputDirectory = ""
 )
@@ -49,10 +49,10 @@ if (Test-Path -LiteralPath $Archive) { Remove-Item -LiteralPath $Archive -Force 
 $ArchiveInfo = Get-Item -LiteralPath $Archive
 $Component = [ordered]@{
     id = "rain-runtime-onnx-cpu"
-    display_name = "SenseVoice native CPU inference component"
+    display_name = "Rain native CPU inference component"
     version = $RuntimeVersion
     accelerator = "cpu"
-    adapter_types = @("sensevoice")
+    adapter_types = @("sensevoice", "streaming_zipformer")
     url = "$($ArtifactBaseUrl.TrimEnd('/'))/$ArchiveName"
     archive_size = [long]$ArchiveInfo.Length
     installed_size = [long](Get-Item -LiteralPath $PackagedWorker).Length
@@ -62,4 +62,4 @@ $Component = [ordered]@{
 $ComponentPath = Assert-RepositoryChild (Join-Path $OutputDirectory "runtime-component-onnx-cpu.json")
 [System.IO.File]::WriteAllText($ComponentPath, ($Component | ConvertTo-Json -Depth 4), [System.Text.UTF8Encoding]::new($false))
 Write-Output "Native runtime artifact: $Archive"
-Write-Output "Merge $ComponentPath into runtime-manifest.json only after the ONNX parity test passes."
+Write-Output "Native component metadata: $ComponentPath"

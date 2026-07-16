@@ -1,6 +1,9 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig};
+use sherpa_onnx::{
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig, OnlineRecognizer,
+    OnlineRecognizerConfig, OnlineStream,
+};
 use std::{
     env,
     io::{self, BufRead, BufReader, BufWriter, Read, Write},
@@ -31,12 +34,12 @@ fn default_sample_rate() -> i32 {
     16_000
 }
 
-struct LoadedModel {
+struct OfflineModel {
     recognizer: OfflineRecognizer,
     model_path: String,
 }
 
-impl LoadedModel {
+impl OfflineModel {
     fn load(model_path: &str, adapter_type: &str, device: &str) -> Result<Self, String> {
         if adapter_type != "sensevoice" {
             return Err(format!(
@@ -84,6 +87,103 @@ impl LoadedModel {
             .map(|result| result.text.trim().to_owned())
             .filter(|text| !text.is_empty())
             .ok_or_else(|| "没有识别到文字".into())
+    }
+}
+
+struct PreviewModel {
+    recognizer: OnlineRecognizer,
+    stream: Option<OnlineStream>,
+    model_path: String,
+}
+
+impl PreviewModel {
+    fn load(model_path: &str, device: &str) -> Result<Self, String> {
+        if !matches!(device, "" | "auto" | "cpu") {
+            return Err("实时预览模型仅支持 CPU".into());
+        }
+        let root = Path::new(model_path);
+        let mut config = OnlineRecognizerConfig::default();
+        config.model_config.transducer.encoder =
+            Some(path_text(&required_file(root, "encoder.int8.onnx")?));
+        config.model_config.transducer.decoder =
+            Some(path_text(&required_file(root, "decoder.onnx")?));
+        config.model_config.transducer.joiner =
+            Some(path_text(&required_file(root, "joiner.int8.onnx")?));
+        config.model_config.tokens = Some(path_text(&required_file(root, "tokens.txt")?));
+        config.model_config.provider = Some("cpu".into());
+        config.model_config.num_threads = 1;
+        config.decoding_method = Some("greedy_search".into());
+        let recognizer =
+            OnlineRecognizer::create(&config).ok_or("无法创建 sherpa-onnx 流式预览识别器")?;
+        Ok(Self {
+            recognizer,
+            stream: None,
+            model_path: model_path.to_owned(),
+        })
+    }
+
+    fn start(&mut self) {
+        self.stream = Some(self.recognizer.create_stream());
+    }
+
+    fn accept(&mut self, audio: &[u8], sample_rate: i32) -> Result<String, String> {
+        if audio.is_empty() || !audio.len().is_multiple_of(2) || sample_rate <= 0 {
+            return Err("实时预览音频必须是非空 PCM16".into());
+        }
+        let stream = self.stream.as_ref().ok_or("实时预览尚未开始")?;
+        let samples = pcm16_to_f32(audio);
+        stream.accept_waveform(sample_rate, &samples);
+        while self.recognizer.is_ready(stream) {
+            self.recognizer.decode(stream);
+        }
+        Ok(self
+            .recognizer
+            .get_result(stream)
+            .map(|result| result.text.trim().to_owned())
+            .unwrap_or_default())
+    }
+
+    fn finish(&mut self) -> String {
+        let Some(stream) = self.stream.take() else {
+            return String::new();
+        };
+        stream.input_finished();
+        while self.recognizer.is_ready(&stream) {
+            self.recognizer.decode(&stream);
+        }
+        self.recognizer
+            .get_result(&stream)
+            .map(|result| result.text.trim().to_owned())
+            .unwrap_or_default()
+    }
+}
+
+enum LoadedModel {
+    Offline(OfflineModel),
+    Preview(PreviewModel),
+}
+
+impl LoadedModel {
+    fn load(model_path: &str, adapter_type: &str, device: &str) -> Result<Self, String> {
+        match adapter_type {
+            "sensevoice" => OfflineModel::load(model_path, adapter_type, device).map(Self::Offline),
+            "streaming_zipformer" => PreviewModel::load(model_path, device).map(Self::Preview),
+            _ => Err(format!("原生 Worker 不支持适配器：{adapter_type}")),
+        }
+    }
+
+    fn model_path(&self) -> &str {
+        match self {
+            Self::Offline(model) => &model.model_path,
+            Self::Preview(model) => &model.model_path,
+        }
+    }
+
+    fn adapter_type(&self) -> &str {
+        match self {
+            Self::Offline(_) => "sensevoice",
+            Self::Preview(_) => "streaming_zipformer",
+        }
     }
 }
 
@@ -190,9 +290,9 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                     "runtime_ready": true,
                     "missing_dependencies": [],
                     "model_ready": loaded.is_some(),
-                    "model_path": loaded.as_ref().map(|model| model.model_path.as_str()).unwrap_or(""),
+                    "model_path": loaded.as_ref().map(LoadedModel::model_path).unwrap_or(""),
                     "device": "cpu",
-                    "adapter_type": loaded.as_ref().map(|_| "sensevoice").unwrap_or("")
+                    "adapter_type": loaded.as_ref().map(LoadedModel::adapter_type).unwrap_or("")
                 }),
             ),
             "load_model" => match LoadedModel::load(
@@ -227,7 +327,10 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                 match loaded
                     .as_ref()
                     .ok_or_else(|| "模型尚未加载".to_string())
-                    .and_then(|model| model.transcribe(&audio, request.sample_rate))
+                    .and_then(|model| match model {
+                        LoadedModel::Offline(model) => model.transcribe(&audio, request.sample_rate),
+                        LoadedModel::Preview(_) => Err("实时预览模型不能执行最终转录".into()),
+                    })
                 {
                     Ok(text) => emit(
                         &mut output,
@@ -248,6 +351,56 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                     ),
                 }
             }
+            "preview_start" => match loaded.as_mut() {
+                Some(LoadedModel::Preview(model)) => {
+                    model.start();
+                    emit(&mut output, "preview_started", &request.request_id, json!({}))
+                }
+                _ => emit(
+                    &mut output,
+                    "worker_error",
+                    &request.request_id,
+                    json!({"code": "PREVIEW_NOT_READY", "message": "实时预览模型尚未加载"}),
+                ),
+            },
+            "preview_audio" => match loaded.as_mut() {
+                Some(LoadedModel::Preview(model)) => {
+                    match model.accept(&audio, request.sample_rate) {
+                        Ok(text) => emit(
+                            &mut output,
+                            "preview_partial",
+                            &request.request_id,
+                            json!({"text": text}),
+                        ),
+                        Err(message) => emit(
+                            &mut output,
+                            "worker_error",
+                            &request.request_id,
+                            json!({"code": "PREVIEW_FAILED", "message": message}),
+                        ),
+                    }
+                }
+                _ => emit(
+                    &mut output,
+                    "worker_error",
+                    &request.request_id,
+                    json!({"code": "PREVIEW_NOT_READY", "message": "实时预览模型尚未加载"}),
+                ),
+            },
+            "preview_finish" => match loaded.as_mut() {
+                Some(LoadedModel::Preview(model)) => emit(
+                    &mut output,
+                    "preview_completed",
+                    &request.request_id,
+                    json!({"text": model.finish()}),
+                ),
+                _ => emit(
+                    &mut output,
+                    "preview_completed",
+                    &request.request_id,
+                    json!({"text": ""}),
+                ),
+            },
             "unload_model" => {
                 loaded = None;
                 emit(

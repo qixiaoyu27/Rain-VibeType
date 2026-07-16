@@ -1,15 +1,20 @@
 # Tasks
 
+- [ ] Validate text polishing with the real Qwen3 0.6B model.
+  - Context: Manifest metadata, llama.cpp archive, lifecycle, UI, timeout, and deterministic safety validation are verified, but the 639 MB model was deliberately not downloaded during automated work.
+  - Location: `src-tauri/src/text_polish.rs`, `src-tauri/resources/models.json`, `docs/WINDOWS_ACCEPTANCE.md`.
+  - Source: Optional text-polishing implementation on 2026-07-15.
+
 - [ ] Validate the preliminary cross-platform inference matrix.
   - Context: CPU performance appears promising but needs repeatable latency and memory measurements on Intel/AMD Windows 11 and Apple Silicon macOS, with NVIDIA CUDA retained as an optional comparison path.
   - Location: `worker/`, `src-tauri/src/runtimes.rs`, `docs/WINDOWS_ACCEPTANCE.md`.
   - Source: Preliminary multi-platform product requirement added on 2026-07-15.
-- [ ] Gate the native SenseVoice runtime with a representative parity corpus.
-  - Context: The native path is materially faster on one official sample but differs from Python/FunASR by one Chinese word; one sample cannot establish accuracy.
+- [ ] Validate native SenseVoice on a real voice-input corpus.
+  - Context: The deterministic 200-clip AISHELL-1 clean-read gate passed twice, but read speech is not representative of close-talk microphones, spontaneous dictation, playback leakage, and everyday background noise. Collect 50–100 consented application recordings with references before production selection.
   - Location: `native-worker/`, `scripts/compare-workers.py`, `worker/rain_worker.py`.
-  - Source: Native CPU vertical-slice benchmark on 2026-07-15.
-- [ ] Publish verified native model artifacts before enabling the native runtime.
-  - Context: Clean installations need official Rain-hosted `model.onnx` and `tokens.txt` hashes; production must not require users to install Python and export locally.
+  - Source: Repeated AISHELL-1 corpus gate on 2026-07-15.
+- [ ] Publish and clean-machine test the native default release assets.
+  - Context: Code, URLs, sizes, hashes, release validation, and local managed installation are complete. GitHub Releases must still receive `sensevoice-small-model.onnx`, `sensevoice-small-tokens.txt`, the native runtime 1.1.0 ZIP, four `rain-stream-preview-*` assets, and the combined manifests before a fresh installation can download them.
   - Location: `worker/export_sensevoice_onnx.py`, `scripts/build-native-runtime.ps1`, runtime/model release manifests.
   - Source: Staged native runtime decision on 2026-07-15.
 - [ ] Run the real-model Windows acceptance matrix.
@@ -24,7 +29,7 @@
   - Context: Official GitHub URLs are configured, but the Release assets, signing keys, optional crash endpoint, and a clean Windows 11 VM are still external release inputs.
   - Location: `scripts/release.ps1`, `scripts/build-runtimes.ps1`, `src-tauri/tauri.conf.json`.
   - Source: Design section 3 and release acceptance.
-- [ ] Publish and clean-machine test both inference components.
-  - Context: The runtime manager and artifact builder are implemented, but the large CPU/CUDA PyInstaller archives have not been built and uploaded in this checkout.
+- [ ] Publish and clean-machine test all inference components.
+  - Context: The native component builds and runs locally; the large Python CPU/CUDA PyInstaller archives and combined manifest have not been built and uploaded in this checkout.
   - Location: `scripts/build-runtimes.ps1`, `src-tauri/src/runtimes.rs`, `docs/WINDOWS_ACCEPTANCE.md`.
   - Source: Optional inference component packaging decision.

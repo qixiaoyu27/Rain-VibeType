@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "manifest_version": "b10016",
+  "components": [
+    {
+      "id": "llama-text-cpu-win-x64",
+      "display_name": "llama.cpp 文本整理 CPU",
+      "version": "b10016",
+      "accelerator": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10016/llama-b10016-bin-win-cpu-x64.zip",
+      "archive_size": 18271892,
+      "installed_size": 46449504,
+      "sha256": "5322309f2bde31f8c40f7f041f1e3d8fa08603a5e979c7ff9f4057ac18e37ec6",
+      "executable": "llama-server.exe"
+    }
+  ]
+}

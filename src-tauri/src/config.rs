@@ -25,8 +25,14 @@ pub struct Config {
     pub idle_timeout_seconds: u64,
     pub injection_method: String,
     pub restore_clipboard: bool,
+    pub text_polish_enabled: bool,
+    pub text_polish_remove_fillers: bool,
+    pub text_polish_paragraphs: bool,
+    pub text_polish_protected_terms: Vec<String>,
+    pub text_polish_idle_timeout_seconds: u64,
     pub show_overlay: bool,
     pub show_overlay_fullscreen: bool,
+    pub overlay_opacity: f64,
     pub start_sound: bool,
     pub stop_sound: bool,
     pub error_sound: bool,
@@ -57,8 +63,14 @@ impl Default for Config {
             idle_timeout_seconds: 600,
             injection_method: "clipboard".into(),
             restore_clipboard: true,
+            text_polish_enabled: false,
+            text_polish_remove_fillers: false,
+            text_polish_paragraphs: true,
+            text_polish_protected_terms: Vec::new(),
+            text_polish_idle_timeout_seconds: 600,
             show_overlay: true,
             show_overlay_fullscreen: true,
+            overlay_opacity: 0.68,
             start_sound: true,
             stop_sound: true,
             error_sound: true,
@@ -103,6 +115,17 @@ impl Config {
         if !matches!(self.injection_method.as_str(), "clipboard" | "typing") {
             return Err("文字注入方式无效".into());
         }
+        if !(60..=86_400).contains(&self.text_polish_idle_timeout_seconds) {
+            return Err("文本整理空闲时间必须在 60 秒到 24 小时之间".into());
+        }
+        if self.text_polish_protected_terms.len() > 100
+            || self
+                .text_polish_protected_terms
+                .iter()
+                .any(|term| term.chars().count() > 100)
+        {
+            return Err("受保护词最多 100 个，每个不超过 100 个字符".into());
+        }
         if !matches!(self.ui_language.as_str(), "system" | "zh-CN" | "en") {
             return Err("界面语言无效".into());
         }
@@ -113,6 +136,9 @@ impl Config {
             && !self.feedback_disabled_confirmed
         {
             return Err("关闭全部视觉与声音反馈前需要明确确认".into());
+        }
+        if !(0.0..=1.0).contains(&self.overlay_opacity) {
+            return Err("浮窗不透明度必须在 0% 到 100% 之间".into());
         }
         if self.python_path.trim().is_empty() {
             return Err("Python 路径不能为空".into());
@@ -207,8 +233,10 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_recording_limits() {
-        let mut config = Config::default();
-        config.max_recording_seconds = 0;
+        let config = Config {
+            max_recording_seconds: 0,
+            ..Config::default()
+        };
         assert!(config.validate().is_err());
     }
 
@@ -228,8 +256,20 @@ mod tests {
         assert_eq!(config.injection_method, "clipboard");
         assert_eq!(config.ui_language, "zh-CN");
         assert!(!config.duck_system_audio);
+        assert!(!config.text_polish_enabled);
+        assert!(config.text_polish_paragraphs);
         assert!(config.autostart);
+        assert_eq!(config.overlay_opacity, 0.68);
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_overlay_opacity() {
+        let config = Config {
+            overlay_opacity: -0.01,
+            ..Config::default()
+        };
+        assert!(config.validate().is_err());
     }
 
     #[test]

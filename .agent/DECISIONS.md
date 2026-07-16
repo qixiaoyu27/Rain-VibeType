@@ -221,3 +221,174 @@ Rationale:
 Consequences:
 - The first render follows the operating-system color preference unless `rain-theme` is already stored locally; an explicit selection persists across reloads.
 - Error red remains available only for destructive or failed states; ordinary navigation, cards, controls, and progress surfaces stay neutral.
+
+## 2026-07-15 — Adopt the selected aqua-glass desktop layout
+
+Decision:
+- Supersede the neutral black-and-white visual direction with the user-selected aqua-glass mock while preserving explicit light/dark switching and the existing left-side navigation.
+
+Context:
+- The user selected a concrete visual reference after requesting larger typography, fewer decorative words, and the original left-menu placement.
+
+Rationale:
+- Matching one approved source keeps layout, scale, color, and interaction hierarchy consistent across the Overview and settings pages.
+
+Consequences:
+- The Overview page uses live shortcut, model, device, privacy, and input values inside the approved status/hero/detail structure.
+- Settings and model pages reuse the same glass tokens, Fluent icon family, title bar, and left navigation.
+
+## 2026-07-15 — Adopt the cloud-rain-audio brand mark
+
+Decision:
+- Use the selected rounded-square cloud mark with three diagonal rain/audio strokes: the center stroke is longest, the two side strokes are shorter, and the right stroke is amber.
+
+Context:
+- The user selected this concept after comparing vertical and diagonal rain-line variants.
+
+Rationale:
+- The diagonal strokes communicate both falling rain and audio rhythm more distinctly than a generic vertical equalizer.
+
+Consequences:
+- `src/assets/rain.svg` is the source of truth, and Windows application icons are regenerated from it.
+
+## 2026-07-15 — Keep the base installer as a modular skeleton
+
+Decision:
+- The base installer contains only the necessary desktop shell and component manager. Models, inference backends, and substantial feature modules are optional downloads with independent install, update, disable, and uninstall lifecycles.
+
+Context:
+- The user requires Rain to remain highly modular and freely configurable across hardware and platforms.
+
+Rationale:
+- Users should not pay the disk, download, dependency, or hardware cost of capabilities they do not choose.
+
+Consequences:
+- Optional downloads always require explicit user action.
+- Missing, disabled, or failed optional components must degrade safely and must not break the core recording and text-injection path.
+- Lightweight configuration UI may stay in the shell; binary runtimes, model weights, and substantial feature assets belong in signed manifest-driven components.
+
+## 2026-07-15 — Rename the Chinese product to 雨音输入法
+
+Decision:
+- Supersede the earlier Chinese display name with `雨音输入法`; use `Rain Vibetype` for human-facing English text while retaining the `Rain-VibeType` repository name.
+
+Context:
+- The user selected the shorter Chinese name and requested a verified Chinese/English switch.
+
+Rationale:
+- The new name is concise and connects the creator's name with voice input without changing the established Rain identity.
+
+Consequences:
+- Tauri product/window metadata, frontend branding, tray tooltip, native dialogs, README, and future installer filenames use `雨音输入法`.
+- The Tauri identifier and GitHub URLs stay unchanged, preserving existing settings, models, and update compatibility.
+
+## 2026-07-15 — Add text polishing as two optional CPU components
+
+Decision:
+- Add Qwen3 0.6B Q8_0 GGUF and the official llama.cpp Windows CPU runtime as independent optional downloads. Keep the feature disabled by default and preserve the ASR result on every failure.
+
+Context:
+- The user requested fast, accurate local text organization while requiring every substantial model and feature to remain modular and removable.
+
+Rationale:
+- The current 0.6B model is already small enough for CPU use. A separate CUDA text runtime would add substantial download and maintenance cost without evidence that this pass needs GPU acceleration.
+
+Consequences:
+- The installer contains only metadata and UI for the feature; the 639,446,688-byte model and 18,271,892-byte runtime archive transfer only after explicit clicks.
+- The validator permits punctuation, whitespace, optional paragraphs, and explicitly enabled filler removal, but rejects changed body characters, numbers, ASCII tokens, or protected terms.
+- Missing components, startup failure, a 30-second load timeout, an 8-second request timeout, or validation failure all return the original recognition text to the existing injection path.
+
+## 2026-07-15 — Separate settings by task instead of reducing capability
+
+Decision:
+- Keep all settings, but give recording, text insertion, feedback, model library, text cleanup, inference, application, and privacy their own navigation pages.
+- Collapse non-current model details with native disclosure controls.
+
+Context:
+- Combining several settings domains into a few pages required excessive vertical scrolling.
+
+Rationale:
+- Task-level pages preserve modular control while keeping each page short and scannable.
+
+Consequences:
+- The left rail has nine entries and becomes independently scrollable on short windows.
+- The current or downloading model opens automatically; other models show only their identity and state until expanded.
+
+## 2026-07-15 — Make Home a voice-input test workspace
+
+Decision:
+- Show the current hotkey and model once, then use the remaining Home area for an editable test box and a mirrored result box.
+
+Context:
+- Input method, privacy, and repeated model summaries did not help users test the product.
+
+Rationale:
+- Focusing a native textarea exercises the real global-shortcut and text-injection path without a separate test backend.
+
+Consequences:
+- Test text exists only in the page DOM and is not persisted.
+- The result box mirrors direct paste, simulated typing, and manual edits through the textarea's native input event.
+
+## 2026-07-15 — Gate native recognition by corpus CER, not exact text identity
+
+Decision:
+- Accept the staged native SenseVoice path when its normalized character error rate is no more than 0.5 percentage points worse than Python/FunASR on the chosen corpus; do not require every hypothesis to be identical.
+
+Context:
+- The native and Python frontends differ in LFR boundary padding and dither. A deterministic 200-clip AISHELL-1 comparison passed twice even though 17 hypotheses differed.
+
+Rationale:
+- Recognition quality against reference transcripts is the product outcome. Maintaining a sherpa-onnx fork solely to reproduce another frontend would add release and cross-platform risk without improving the measured result.
+
+Consequences:
+- Keep the current sherpa-onnx frontend while the quality gate passes.
+- The clean-read result is preliminary; production selection still needs real microphone, spontaneous-dictation, and noisy-speech data plus official model artifacts.
+
+## 2026-07-15 — Make native SenseVoice the default
+
+Decision:
+- New SenseVoice installations use the separately downloaded Rust/sherpa-onnx CPU Worker and unquantized ONNX model. Python/FunASR remains for the other ASR adapters and legacy SenseVoice directories that do not contain native model files.
+
+Context:
+- The user accepted the repeated 200-clip CER result and explicitly requested the native path now become the default.
+
+Rationale:
+- The native path is smaller, loads faster, recognizes faster, and passed the agreed accuracy gate twice. Reusing the existing Worker protocol and component repository avoids a second application pipeline.
+
+Consequences:
+- The base installer remains lightweight; the native runtime and model still require an explicit download.
+- Release builds must publish and verify the native runtime ZIP, `model.onnx`, `tokens.txt`, and combined manifests.
+- SenseVoice uses CPU even when NVIDIA is present; selecting Fun-ASR Nano or Paraformer-zh continues to use the configured CPU/NVIDIA Python component.
+
+## 2026-07-15 — Make inference runtimes model-owned dependencies
+
+Decision:
+- Map every built-in local model to its preferred runtime in the model manifest. A model download automatically installs its missing runtime; the UI has no independent runtime download control.
+- Prevent removal while any installed model references a runtime. Deleting the last referencing model automatically removes that runtime.
+
+Context:
+- Future built-in models may use different optimized frameworks, and users should choose models rather than manage framework packages manually.
+
+Rationale:
+- Deriving runtime ownership from installed model markers keeps the workflow one-click and avoids orphaned multi-gigabyte frameworks without introducing a second package database.
+
+Consequences:
+- `models.json` uses schema 2 and runtime mappings are required for every model definition.
+- Shared runtimes such as the FunASR CPU/NVIDIA packages remain installed until both Fun-ASR Nano and Paraformer-zh are gone.
+- Normal startup does not refresh a remote runtime catalog; the model download action is the explicit consent boundary for both runtime and weights.
+
+## 2026-07-16 — Keep live preview separate from final transcription
+
+Decision:
+- Use an optional bilingual streaming Zipformer in a second native Worker for partial overlay text, while SenseVoice remains the sole final transcription whose result is injected.
+
+Context:
+- The overlay needs responsive text during recording, but changing or repeatedly rerunning the accepted final model would risk latency and output quality.
+
+Rationale:
+- A roughly 57 MiB quantized streaming model produces incremental hypotheses on CPU. Separate Worker state makes preview failure non-fatal and prevents unstable partial hypotheses from contaminating final output.
+
+Consequences:
+- The preview component is an explicit optional model download with purpose `asr_preview`; it cannot be selected as the final model.
+- Both models reuse native runtime version 1.1.0, whose adapter list includes `sensevoice` and `streaming_zipformer`.
+- Missing preview assets, load failure, or decode failure only suppresses preview and records a diagnostic; final SenseVoice transcription and injection continue unchanged.

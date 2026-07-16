@@ -1,5 +1,14 @@
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 const button = document.getElementById("cancel");
+document.documentElement.dataset.theme = localStorage.getItem("rain-theme") || "light";
+window.addEventListener("storage", () => {
+  document.documentElement.dataset.theme = localStorage.getItem("rain-theme") || "light";
+});
+listen("overlay-status", ({ payload }) => {
+  document.documentElement.dataset.theme = localStorage.getItem("rain-theme") || "light";
+  button.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.68));
+});
 
 async function getConfigWhenReady() {
   for (let attempt = 0; attempt < 20; attempt += 1) {

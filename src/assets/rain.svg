@@ -1,6 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Rain">
-  <rect width="128" height="128" rx="30" fill="#08141d"/>
-  <path d="M64 17C50 37 35 52 35 76a29 29 0 0 0 58 0c0-24-15-39-29-59Z" fill="#65d5e4"/>
-  <path d="M48 75c0 11 7 18 17 21" fill="none" stroke="#dffaff" stroke-linecap="round" stroke-width="7" opacity=".9"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" shape-rendering="geometricPrecision" role="img" aria-label="Rain">
+  <defs>
+    <linearGradient id="tile" x1="18" y1="14" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f9fdff"/>
+      <stop offset="1" stop-color="#dff5fa"/>
+    </linearGradient>
+    <linearGradient id="navy" x1="24" y1="19" x2="105" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#123f79"/>
+      <stop offset="1" stop-color="#0757a6"/>
+    </linearGradient>
+    <linearGradient id="rain" x1="42" y1="73" x2="62" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#08bfd1"/>
+      <stop offset="1" stop-color="#1766d6"/>
+    </linearGradient>
+  </defs>
 
+  <rect x="6" y="6" width="116" height="116" rx="29" fill="url(#tile)" stroke="url(#navy)" stroke-width="6"/>
+  <path d="M39 70c-7 0-12-6-12-14s5-14 12-14c3 0 5 1 7 2 3-12 10-20 19-20 11 0 19 10 20 23 2-1 4-2 7-2 7 0 12 6 12 14s-5 14-12 14" fill="none" stroke="url(#navy)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48 78 41 92M67 74 55 99" fill="none" stroke="url(#rain)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M85 79 78 93" fill="none" stroke="#f2a43a" stroke-width="8" stroke-linecap="round"/>
+  <path d="M104 113c6-3 9-7 11-13" fill="none" stroke="#f2a43a" stroke-width="3" stroke-linecap="round"/>
+</svg>

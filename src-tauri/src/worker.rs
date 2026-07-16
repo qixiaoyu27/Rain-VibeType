@@ -165,6 +165,51 @@ impl WorkerClient {
         })
     }
 
+    pub fn start_preview(&mut self, request_id: &str) -> Result<(), String> {
+        self.send(
+            serde_json::json!({"command": "preview_start", "request_id": request_id}),
+            &[],
+        )?;
+        self.read_until(request_id, &["preview_started"])?;
+        Ok(())
+    }
+
+    pub fn preview_audio(
+        &mut self,
+        request_id: &str,
+        sample_rate: u32,
+        pcm: Vec<i16>,
+    ) -> Result<String, String> {
+        let mut bytes = Vec::with_capacity(pcm.len() * 2);
+        for sample in pcm {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        self.send(
+            serde_json::json!({
+                "command": "preview_audio",
+                "request_id": request_id,
+                "sample_rate": sample_rate,
+                "audio_bytes": bytes.len()
+            }),
+            &bytes,
+        )?;
+        let response = self.read_until(request_id, &["preview_partial"])?;
+        Ok(response["text"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_owned())
+    }
+
+    pub fn finish_preview(&mut self, request_id: &str) -> Result<(), String> {
+        self.send(
+            serde_json::json!({"command": "preview_finish", "request_id": request_id}),
+            &[],
+        )?;
+        self.read_until(request_id, &["preview_completed"])?;
+        Ok(())
+    }
+
     pub fn unload(&mut self) -> Result<(), String> {
         if self.child.is_none() || self.loaded_model.is_none() {
             self.loaded_model = None;
@@ -178,6 +223,10 @@ impl WorkerClient {
         self.read_until(&request_id, &["model_unloaded"])?;
         self.loaded_model = None;
         Ok(())
+    }
+
+    pub fn shutdown(&mut self) {
+        self.stop();
     }
 
     fn ensure_started(&mut self, python_path: &str) -> Result<(), String> {
@@ -469,6 +518,9 @@ while True:
     elif command == "transcribe":
         emit("transcription_started", "late-request")
         emit("transcription_completed", request_id, text=str(len(audio)), language="en", duration_ms=1, inference_ms=2)
+    elif command == "preview_start": emit("preview_started", request_id)
+    elif command == "preview_audio": emit("preview_partial", request_id, text=str(len(audio)))
+    elif command == "preview_finish": emit("preview_completed", request_id, text="")
     elif command == "unload_model": emit("model_unloaded", request_id)
     elif command == "shutdown":
         open("{shutdown_marker_for_python}", "w", encoding="utf-8").write("ok")
@@ -487,6 +539,23 @@ while True:
         assert_eq!(result.text, "6");
         assert_eq!(result.inference_ms, 2);
         worker.unload().unwrap();
+        worker
+            .load_model(
+                "python",
+                "load-preview",
+                "preview",
+                "streaming_zipformer",
+                "cpu",
+            )
+            .unwrap();
+        worker.start_preview("preview-1").unwrap();
+        assert_eq!(
+            worker
+                .preview_audio("preview-1", 16_000, vec![1_i16, 2_i16])
+                .unwrap(),
+            "4"
+        );
+        worker.finish_preview("preview-1").unwrap();
         worker.stop();
         assert!(shutdown_marker.is_file());
         let _ = std::fs::remove_dir_all(directory);

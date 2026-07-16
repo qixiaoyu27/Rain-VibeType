@@ -247,8 +247,10 @@ impl InputTarget {
             if monitor.is_null() {
                 return false;
             }
-            let mut monitor_info = MONITORINFO::default();
-            monitor_info.cbSize = size_of::<MONITORINFO>() as u32;
+            let mut monitor_info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
             let mut window = RECT::default();
             GetMonitorInfoW(monitor, &mut monitor_info) != 0
                 && GetWindowRect(self.foreground as *mut _, &mut window) != 0
@@ -265,8 +267,10 @@ impl InputTarget {
             if monitor.is_null() {
                 return None;
             }
-            let mut info = MONITORINFO::default();
-            info.cbSize = size_of::<MONITORINFO>() as u32;
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
             if GetMonitorInfoW(monitor, &mut info) == 0 {
                 return None;
             }
@@ -500,7 +504,7 @@ pub fn confirm_exit(english: bool) -> bool {
     }
     .encode_utf16()
     .collect::<Vec<_>>();
-    let title = "Rain氛围输入法\0".encode_utf16().collect::<Vec<_>>();
+    let title = "雨音输入法\0".encode_utf16().collect::<Vec<_>>();
     unsafe {
         MessageBoxW(
             ptr::null_mut(),

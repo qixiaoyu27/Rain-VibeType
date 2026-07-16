@@ -1,6 +1,6 @@
 param(
     [string]$Python = "py -3.11",
-    [string]$RuntimeVersion = "1.0.0",
+    [string]$RuntimeVersion = "1.1.0",
     [string]$TorchVersion = "2.11.0",
     [string]$ArtifactBaseUrl = $env:RAIN_RUNTIME_ARTIFACT_BASE_URL,
     [string]$OutputDirectory = ""
@@ -50,6 +50,13 @@ $OutputDirectory = Assert-RepositoryChild $OutputDirectory
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+& (Join-Path $PSScriptRoot "build-native-runtime.ps1") `
+    -RuntimeVersion $RuntimeVersion `
+    -ArtifactBaseUrl $ArtifactBaseUrl `
+    -OutputDirectory $OutputDirectory
+if ($LASTEXITCODE -ne 0) { throw "Native runtime component build failed." }
+$NativeComponent = Get-Content -Raw -LiteralPath (Join-Path $OutputDirectory "runtime-component-onnx-cpu.json") | ConvertFrom-Json
+
 $Variants = @(
     [pscustomobject]@{
         Id = "rain-runtime-cpu"
@@ -65,7 +72,7 @@ $Variants = @(
     }
 )
 
-$Components = foreach ($Variant in $Variants) {
+$PythonComponents = foreach ($Variant in $Variants) {
     $Venv = Assert-RepositoryChild (Join-Path $Root ".venv-runtime-$($Variant.Accelerator)")
     $VenvPython = Join-Path $Venv "Scripts\python.exe"
     New-BuildVenv $Venv
@@ -122,6 +129,7 @@ $Components = foreach ($Variant in $Variants) {
         executable = "rain-worker/rain-worker.exe"
     }
 }
+$Components = @($NativeComponent) + @($PythonComponents)
 
 $Manifest = [ordered]@{
     schema_version = 1
@@ -133,4 +141,4 @@ $ManifestJson = $Manifest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText($ManifestPath, $ManifestJson, [System.Text.UTF8Encoding]::new($false))
 
 Write-Output "Runtime artifacts created: $OutputDirectory"
-Write-Output "Publish both ZIP files and runtime-manifest.json before releasing the base installer."
+Write-Output "Publish the native/Python ZIP files and runtime-manifest.json before releasing the base installer."

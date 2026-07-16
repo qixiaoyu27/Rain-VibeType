@@ -14,6 +14,11 @@ use zip::ZipArchive;
 const USER_AGENT: &str = concat!("RainVibetype/", env!("CARGO_PKG_VERSION"));
 const MANIFEST_FILE: &str = ".runtime-manifest.json";
 const MARKER_FILE: &str = ".rain-runtime.json";
+pub const NATIVE_SENSEVOICE_COMPONENT: &str = "rain-runtime-onnx-cpu";
+
+fn manifest_is_unpublished(status: StatusCode) -> bool {
+    status == StatusCode::NOT_FOUND
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RuntimeManifest {
@@ -77,11 +82,23 @@ pub struct RuntimeRepository {
 
 impl RuntimeRepository {
     pub fn new(root: PathBuf) -> Result<Self, String> {
+        Self::new_with_fallback(root, None)
+    }
+
+    pub fn new_with_embedded(root: PathBuf, manifest_json: &str) -> Result<Self, String> {
+        let manifest: RuntimeManifest = serde_json::from_str(manifest_json)
+            .map_err(|error| format!("内置推理组件清单无效：{error}"))?;
+        validate_manifest(&manifest)?;
+        Self::new_with_fallback(root, Some(manifest))
+    }
+
+    fn new_with_fallback(root: PathBuf, fallback: Option<RuntimeManifest>) -> Result<Self, String> {
         fs::create_dir_all(&root).map_err(|error| format!("无法创建推理组件目录：{error}"))?;
         let manifest = fs::read(root.join(MANIFEST_FILE))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .filter(|manifest| validate_manifest(manifest).is_ok());
+            .filter(|manifest| validate_manifest(manifest).is_ok())
+            .or(fallback);
         Ok(Self { root, manifest })
     }
 
@@ -91,10 +108,16 @@ impl RuntimeRepository {
             return Err("推理组件清单必须使用 HTTPS".into());
         }
         let client = download_client()?;
-        let mut response = client
+        let response = client
             .get(url)
+            .timeout(Duration::from_secs(5))
             .send()
-            .and_then(|response| response.error_for_status())
+            .map_err(|error| format!("无法下载推理组件清单：{error}"))?;
+        if manifest_is_unpublished(response.status()) {
+            return Ok(false);
+        }
+        let mut response = response
+            .error_for_status()
             .map_err(|error| format!("无法下载推理组件清单：{error}"))?;
         let mut bytes = Vec::new();
         response
@@ -129,15 +152,26 @@ impl RuntimeRepository {
         Ok(changed)
     }
 
-    pub fn status(&self, preference: &str, python_path: &str) -> RuntimeStatus {
+    pub fn status_for_component(
+        &self,
+        preference: &str,
+        python_path: &str,
+        component_id: Option<&str>,
+        allow_python_fallback: bool,
+    ) -> RuntimeStatus {
         let (nvidia_detected, nvidia_name) = detect_nvidia();
         let accelerator = preferred_accelerator(preference, nvidia_detected).to_owned();
-        let recommended_component = self
-            .manifest
-            .as_ref()
-            .and_then(|manifest| component_for_accelerator(manifest, &accelerator));
-        let installed = self.installed_for_accelerator(&accelerator);
-        let python_ready = explicit_python(python_path).is_some();
+        let recommended_component = component_id.and_then(|id| {
+            self.manifest.as_ref().and_then(|manifest| {
+                manifest
+                    .components
+                    .iter()
+                    .find(|component| component.id == id)
+            })
+        });
+        let installed =
+            component_id.and_then(|id| self.installed_matching(|component| component.id == id));
+        let python_ready = allow_python_fallback && explicit_python(python_path).is_some();
         let active_executable = installed
             .as_ref()
             .map(|(_, executable)| executable.to_string_lossy().into_owned());
@@ -172,7 +206,9 @@ impl RuntimeRepository {
             },
             nvidia_detected,
             nvidia_name,
-            recommended_accelerator: accelerator,
+            recommended_accelerator: recommended_component
+                .map(|component| component.accelerator.clone())
+                .unwrap_or(accelerator),
             recommended_component_id: recommended_component.map(|component| component.id.clone()),
             active_component_id,
             active_executable,
@@ -180,10 +216,24 @@ impl RuntimeRepository {
         }
     }
 
+    pub fn component(&self, component_id: &str) -> Option<&RuntimeComponent> {
+        self.manifest
+            .as_ref()?
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+    }
+
+    pub fn is_installed(&self, component_id: &str) -> bool {
+        self.installed_matching(|component| component.id == component_id)
+            .is_some()
+    }
+
     pub fn download(
         &self,
         component_id: Option<&str>,
         preference: &str,
+        prefer_native_sensevoice: bool,
         mut progress: impl FnMut(RuntimeDownloadProgress),
     ) -> Result<PathBuf, String> {
         let manifest = self
@@ -198,10 +248,10 @@ impl RuntimeRepository {
                 .iter()
                 .find(|component| component.id == id)
                 .ok_or("RUNTIME_NOT_FOUND：推理组件不在当前清单中")?,
-            None => component_for_accelerator(manifest, accelerator)
+            None => component_for_runtime(manifest, accelerator, prefer_native_sensevoice)
                 .ok_or("RUNTIME_NOT_FOUND：当前清单没有适合此设备的推理组件")?,
         };
-        if component.accelerator != accelerator {
+        if component.id != NATIVE_SENSEVOICE_COMPONENT && component.accelerator != accelerator {
             return Err("RUNTIME_MISMATCH：所选推理组件与当前推理设备设置不一致".into());
         }
         if component.accelerator == "nvidia" && !nvidia {
@@ -270,6 +320,31 @@ impl RuntimeRepository {
         Ok(final_dir.join(relative_path(&component.executable)?))
     }
 
+    pub fn remove(&self, component_id: &str) -> Result<(), String> {
+        if !safe_identifier(component_id) {
+            return Err("RUNTIME_NOT_FOUND：推理组件 ID 无效".into());
+        }
+        let component_root = self.root.join(component_id);
+        if component_root.exists() {
+            safe_remove_dir(&self.root, &component_root)?;
+        }
+        let downloads = self.root.join(".downloads");
+        if downloads.is_dir() {
+            for entry in fs::read_dir(downloads).map_err(|error| error.to_string())? {
+                let path = entry.map_err(|error| error.to_string())?.path();
+                if path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&format!("{component_id}-")))
+                    && path.is_file()
+                {
+                    fs::remove_file(path).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn component_executable(&self, component: &RuntimeComponent) -> Option<PathBuf> {
         let directory = self.root.join(&component.id).join(&component.version);
         let marker = read_marker(&directory)?;
@@ -280,7 +355,10 @@ impl RuntimeRepository {
         executable.is_file().then_some(executable)
     }
 
-    fn installed_for_accelerator(&self, accelerator: &str) -> Option<(InstallMarker, PathBuf)> {
+    fn installed_matching(
+        &self,
+        predicate: impl Fn(&RuntimeComponent) -> bool,
+    ) -> Option<(InstallMarker, PathBuf)> {
         let mut matches = Vec::new();
         for component_entry in fs::read_dir(&self.root).ok()?.flatten() {
             let component_path = component_entry.path();
@@ -296,7 +374,7 @@ impl RuntimeRepository {
                 let Some(marker) = read_marker(&directory) else {
                     continue;
                 };
-                if marker.component.accelerator != accelerator {
+                if !predicate(&marker.component) {
                     continue;
                 }
                 let Ok(relative) = relative_path(&marker.component.executable) else {
@@ -327,14 +405,28 @@ fn preferred_accelerator(preference: &str, nvidia_detected: bool) -> &'static st
     }
 }
 
-fn component_for_accelerator<'a>(
+pub fn selected_accelerator(preference: &str) -> String {
+    preferred_accelerator(preference, detect_nvidia().0).to_owned()
+}
+
+fn component_for_runtime<'a>(
     manifest: &'a RuntimeManifest,
     accelerator: &str,
+    prefer_native_sensevoice: bool,
 ) -> Option<&'a RuntimeComponent> {
-    manifest
-        .components
-        .iter()
-        .find(|component| component.accelerator == accelerator)
+    prefer_native_sensevoice
+        .then(|| {
+            manifest
+                .components
+                .iter()
+                .find(|component| component.id == NATIVE_SENSEVOICE_COMPONENT)
+        })
+        .flatten()
+        .or_else(|| {
+            manifest.components.iter().find(|component| {
+                component.accelerator == accelerator && component.id != NATIVE_SENSEVOICE_COMPONENT
+            })
+        })
 }
 
 fn detect_nvidia() -> (bool, Option<String>) {
@@ -580,6 +672,17 @@ mod tests {
             manifest_version: "2026-07-14".into(),
             components: vec![
                 RuntimeComponent {
+                    id: NATIVE_SENSEVOICE_COMPONENT.into(),
+                    display_name: "Native SenseVoice".into(),
+                    version: "1.0.0".into(),
+                    accelerator: "cpu".into(),
+                    url: "https://example.invalid/native.zip".into(),
+                    archive_size: 10,
+                    installed_size: 20,
+                    sha256: "c".repeat(64),
+                    executable: "rain-worker/rain-worker.exe".into(),
+                },
+                RuntimeComponent {
                     id: "rain-runtime-cpu".into(),
                     display_name: "CPU".into(),
                     version: "1.0.0".into(),
@@ -611,6 +714,18 @@ mod tests {
         assert_eq!(preferred_accelerator("auto", false), "cpu");
         assert_eq!(preferred_accelerator("cpu", true), "cpu");
         assert_eq!(preferred_accelerator("cuda", false), "nvidia");
+        assert_eq!(
+            component_for_runtime(&manifest(), "nvidia", true)
+                .unwrap()
+                .id,
+            NATIVE_SENSEVOICE_COMPONENT
+        );
+        assert_eq!(
+            component_for_runtime(&manifest(), "nvidia", false)
+                .unwrap()
+                .id,
+            "rain-runtime-nvidia"
+        );
     }
 
     #[test]
@@ -622,5 +737,24 @@ mod tests {
         let mut escaping = manifest();
         escaping.components[0].executable = "../rain-worker.exe".into();
         assert!(validate_manifest(&escaping).is_err());
+    }
+
+    #[test]
+    fn missing_release_manifest_is_not_a_runtime_error() {
+        assert!(manifest_is_unpublished(StatusCode::NOT_FOUND));
+        assert!(!manifest_is_unpublished(StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    #[test]
+    fn orphan_runtime_can_be_removed_without_a_catalog() {
+        let root =
+            std::env::temp_dir().join(format!("rain-runtime-remove-{}", uuid::Uuid::new_v4()));
+        let component = root.join("orphan-runtime").join("1.0.0");
+        fs::create_dir_all(&component).unwrap();
+        fs::write(component.join("worker.exe"), b"test").unwrap();
+        let repository = RuntimeRepository::new(root.clone()).unwrap();
+        repository.remove("orphan-runtime").unwrap();
+        assert!(!root.join("orphan-runtime").exists());
+        let _ = fs::remove_dir_all(root);
     }
 }
