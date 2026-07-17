@@ -48,7 +48,7 @@ Confirmed on Windows 11 x64 through 2026-07-16:
 - Official llama.cpp `b10016` Windows CPU archive verification
   - The 18,271,892-byte archive matches SHA-256 `5322309f2bde31f8c40f7f041f1e3d8fa08603a5e979c7ff9f4057ac18e37ec6`; `llama-server.exe --help` exposes `--no-webui`, `--api-key`, `--sleep-idle-seconds`, `--threads-http`, and `--jinja`. The temporary archive and extraction were removed after verification.
 - `npm run build`
-  - Previously confirmed the NSIS build flow. After the product rename, the expected unsigned filename is `src-tauri/target/release/bundle/nsis/雨音输入法_1.0.0_x64-setup.exe`; this renamed installer has not yet been rebuilt.
+  - Rebuilds `src-tauri/target/release/bundle/nsis/雨音输入法_1.0.0_x64-setup.exe`. The NSIS installer finishes successfully; without `TAURI_SIGNING_PRIVATE_KEY`, the subsequent updater-artifact signing step fails as intended. The 2026-07-17 installer is unsigned and 3,858,545 bytes.
 - Native overlay visibility build check
   - The release build compiles Win32 `SetWindowPos(..., SWP_NOACTIVATE | SWP_SHOWWINDOW)` and paired `ShowWindow(SW_HIDE)` for both overlay windows.
 - Manual development UI smoke test

@@ -7,7 +7,7 @@ Updated: 2026-07-17
 - The full Windows feature surface from the design document is implemented: tray/hotkey/overlay, in-memory capture, safe target handling, clipboard and typing output, three ASR adapters, optional local text polishing, model repository, resource policies, autostart, updater, diagnostics, and optional crash reports.
 - First launch now installs the native SenseVoice CPU component and native model after one explicit click. Other model families retain CPU/NVIDIA Python components; no transfer starts silently.
 - Automated verification currently passes: 33 Tauri Rust tests with one live-network test ignored, 1 native-Worker Rust test, both strict Clippy checks, frontend syntax checks, and release-script AST checks.
-- The base NSIS no longer bundles `worker-dist`, PyTorch, CUDA, llama.cpp, or model weights. An unsigned local installer was previously produced at about 3.6 MB; generated installers and build outputs were removed on 2026-07-15, and updater-artifact signing remains unavailable without the private release key.
+- The base NSIS no longer bundles `worker-dist`, PyTorch, CUDA, llama.cpp, or model weights. The latest unsigned local installer is `src-tauri/target/release/bundle/nsis/雨音输入法_1.0.0_x64-setup.exe` (3,858,545 bytes, built 2026-07-17); updater-artifact signing remains unavailable without the private release key.
 - `scripts/build-runtimes.ps1` produces CPU and CUDA 12.8 PyInstaller ZIPs plus a validated manifest containing final HTTPS URLs, sizes, executable paths, and SHA-256 hashes.
 - Windows development UI smoke testing passes for Chinese onboarding, model/settings pages, language switching, unconfigured-updater feedback, and no-model startup.
 - The ModelScope LFS `HTTP 403 Forbidden` failure is fixed by setting the shared downloader User-Agent. A live one-byte Range request against SenseVoice `model.pt` now passes through the real CDN; the interrupted `.incomplete` directory remains resumable.
@@ -23,7 +23,7 @@ Updated: 2026-07-17
 - The voice settings page now includes an opt-in switch that reduces system playback to 20% only while recording and restores the prior master volume afterward.
 - The Chinese/English switch covers frontend text, tray content, backend overlays, and now the title-bar brand (`雨音输入法` / `Rain Vibetype`).
 - Hovering disabled component-download buttons no longer shows the Windows wait cursor.
-- A new installer has not yet been packaged under the `雨音输入法` filename; signed updater artifacts still require the private release key.
+- The latest installer has been packaged under the `雨音输入法` filename; signed updater artifacts still require the private release key.
 - The unquantized SenseVoice ONNX export and CPU-only Rust/sherpa-onnx Worker are now the default SenseVoice path. The generated runtime ZIP is about 6.7 MiB; the model remains an explicit external download of about 0.94 GB.
 - A deterministic 200-clip AISHELL-1 clean-read comparison passed twice with identical accuracy: native 236/2,867 errors (8.23% CER, 124 exact) versus Python 243/2,867 (8.48% CER, 122 exact). The native gap was -0.24 percentage points against the +0.5-point limit; native was better on 10 clips, Python on 3, and 187 tied by error count.
 - The two Workers produced different normalized text on 17/200 clips, but exact output identity is not the acceptance criterion. Because the corpus gate already passes, do not fork sherpa-onnx or force FunASR LFR/dither behavior without evidence of a real-world quality regression.
