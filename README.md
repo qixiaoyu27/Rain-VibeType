@@ -35,7 +35,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) 下载 `雨音输入法_*_x64-setup.exe`。
+1. 从 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) 下载 `Rain-Vibetype_*_x64-setup.exe`。
 2. 安装后启动 Rain，按引导选择并下载模型。
 3. 将光标放到任意输入框，按住 `Ctrl + Shift + Space` 说话；松开后文字会写入当前应用。
 
