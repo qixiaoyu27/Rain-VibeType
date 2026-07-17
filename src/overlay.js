@@ -21,7 +21,7 @@ window.addEventListener("storage", syncTheme);
 listen("overlay-status", ({ payload }) => {
   syncTheme();
   overlay.dataset.state = payload.state;
-  overlay.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.68));
+  overlay.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.10));
   if (payload.state === "recording") {
     const level = normalizedAudioLevel(payload.level);
     levelHistory.push(level);

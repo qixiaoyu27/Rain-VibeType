@@ -10,6 +10,7 @@ use std::{
 const MAX_INPUT_CHARS: usize = 1_500;
 
 pub struct TextPolishOptions<'a> {
+    pub rewrite: bool,
     pub remove_fillers: bool,
     pub paragraphs: bool,
     pub protected_terms: &'a [String],
@@ -66,7 +67,7 @@ impl TextPolisher {
             .map(|server| (server.port, server.api_key.clone()))
             .ok_or("TEXT_POLISH_RUNTIME_FAILED：服务未启动")?;
 
-        let system = system_prompt(options.remove_fillers, options.paragraphs);
+        let system = system_prompt(options.rewrite, options.remove_fillers, options.paragraphs);
         let protected = if options.protected_terms.is_empty() {
             "无".to_owned()
         } else {
@@ -244,13 +245,20 @@ fn available_port() -> Result<u16, String> {
         .map_err(|error| format!("TEXT_POLISH_RUNTIME_FAILED：无法分配本地端口：{error}"))
 }
 
-fn system_prompt(remove_fillers: bool, paragraphs: bool) -> String {
+fn system_prompt(rewrite: bool, remove_fillers: bool, paragraphs: bool) -> String {
     format!(
         "你是本地语音转写整理器。只输出整理后的正文，不要解释、标题、引号或 Markdown。\
-         只允许修正标点、空格和分段；不得改写、总结、补充或删除事实，不得改变数字、英文、专名和语序。\
+         {}不得总结、补充新信息或改变事实，必须保留数字、英文、专名和受保护词。\
          {}{}",
+        if rewrite {
+            "可以在不改变原意的前提下精简重复表达、调整语序和措辞，使文字自然通顺；"
+        } else {
+            "只允许修正标点、空格和分段；不得改写或改变语序；"
+        },
         if remove_fillers {
             "可以删除明确的嗯、呃、额等口头停顿词。"
+        } else if rewrite {
+            "保留嗯、呃、额等口头词和其他具有语义的内容，不要擅自删除信息。"
         } else {
             "不得删除任何口头词。"
         },
@@ -273,6 +281,20 @@ fn validate_candidate(
         return Err("TEXT_POLISH_REJECTED：整理结果长度异常".into());
     }
     let ascii_tokens = protected_ascii_tokens(raw);
+    if options.rewrite
+        && (ascii_tokens != protected_ascii_tokens(candidate)
+            || protected_cjk_number_tokens(raw) != protected_cjk_number_tokens(candidate))
+    {
+        return Err("TEXT_POLISH_REJECTED：数字或英文发生变化".into());
+    }
+    if options.rewrite
+        && !options.remove_fillers
+        && ["嗯", "呃", "额"]
+            .into_iter()
+            .any(|term| occurrence_count(raw, term) != occurrence_count(candidate, term))
+    {
+        return Err("TEXT_POLISH_REJECTED：停顿词设置未被遵守".into());
+    }
     for term in options
         .protected_terms
         .iter()
@@ -283,13 +305,27 @@ fn validate_candidate(
             return Err(format!("TEXT_POLISH_REJECTED：受保护内容发生变化：{term}"));
         }
     }
-    let candidate_signature = content_signature(candidate);
+    let candidate_signature = if options.rewrite && options.remove_fillers {
+        content_signature(&remove_fillers(candidate))
+    } else {
+        content_signature(candidate)
+    };
     let raw_signature = if options.remove_fillers {
         content_signature(&remove_fillers(raw))
     } else {
         content_signature(raw)
     };
-    if candidate_signature != raw_signature {
+    if options.rewrite {
+        let raw_chars = raw_signature.chars().count();
+        let candidate_chars = candidate_signature.chars().count();
+        if candidate_chars.saturating_mul(100) < raw_chars.saturating_mul(60)
+            || candidate_chars.saturating_mul(100) > raw_chars.saturating_mul(150)
+            || edit_distance(&raw_signature, &candidate_signature).saturating_mul(100)
+                > raw_chars.saturating_mul(50)
+        {
+            return Err("TEXT_POLISH_REJECTED：正文改写幅度过大".into());
+        }
+    } else if candidate_signature != raw_signature {
         return Err("TEXT_POLISH_REJECTED：正文内容发生变化".into());
     }
     Ok(())
@@ -329,9 +365,55 @@ fn protected_ascii_tokens(text: &str) -> Vec<String> {
     if !current.is_empty() {
         push_ascii_token(&mut tokens, &mut current);
     }
-    tokens.sort();
-    tokens.dedup();
     tokens
+}
+
+fn protected_cjk_number_tokens(text: &str) -> Vec<String> {
+    text.split(|character: char| {
+        !matches!(
+            character,
+            '零' | '〇'
+                | '一'
+                | '二'
+                | '两'
+                | '三'
+                | '四'
+                | '五'
+                | '六'
+                | '七'
+                | '八'
+                | '九'
+                | '十'
+                | '百'
+                | '千'
+                | '万'
+                | '亿'
+                | '点'
+        )
+    })
+    .filter(|token| !token.is_empty())
+    .map(str::to_owned)
+    .collect()
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (row, left_character) in left.chars().enumerate() {
+        let mut current = Vec::with_capacity(right.len() + 1);
+        current.push(row + 1);
+        for (column, right_character) in right.iter().enumerate() {
+            current.push(if left_character == *right_character {
+                previous[column]
+            } else {
+                1 + previous[column]
+                    .min(previous[column + 1])
+                    .min(current[column])
+            });
+        }
+        previous = current;
+    }
+    previous[right.len()]
 }
 
 fn push_ascii_token(tokens: &mut Vec<String>, current: &mut String) {
@@ -353,6 +435,7 @@ mod tests {
 
     fn options(remove_fillers: bool) -> TextPolishOptions<'static> {
         TextPolishOptions {
+            rewrite: false,
             remove_fillers,
             paragraphs: true,
             protected_terms: &[],
@@ -390,5 +473,44 @@ mod tests {
     fn filler_removal_requires_explicit_option() {
         assert!(validate_candidate("嗯今天开会", "今天开会。", &options(false)).is_err());
         assert!(validate_candidate("嗯今天开会", "今天开会。", &options(true)).is_ok());
+    }
+
+    #[test]
+    fn rewrite_allows_light_edits_but_rejects_fact_changes_and_excessive_deletion() {
+        let rewrite = TextPolishOptions {
+            rewrite: true,
+            ..options(false)
+        };
+        assert!(validate_candidate(
+            "这个功能用起来还是比较方便的",
+            "这个功能使用起来比较方便。",
+            &rewrite
+        )
+        .is_ok());
+        assert!(validate_candidate(
+            "RTX 5060 Ti 这个方案我觉得很好",
+            "我认为 RTX 5090 Ti 方案很好。",
+            &rewrite
+        )
+        .is_err());
+        assert!(validate_candidate("需要三十二个文件", "需要二十三个文件。", &rewrite).is_err());
+        assert!(validate_candidate("嗯这个功能比较方便", "这个功能比较方便。", &rewrite).is_err());
+        assert!(validate_candidate(
+            "嗯这个功能比较方便",
+            "这个功能比较方便。",
+            &TextPolishOptions {
+                rewrite: true,
+                ..options(true)
+            }
+        )
+        .is_ok());
+        assert!(validate_candidate(
+            "这个方案可以帮助我们提高工作效率和沟通质量",
+            "方案很好。",
+            &rewrite
+        )
+        .is_err());
+        assert!(system_prompt(false, false, true).contains("不得改写"));
+        assert!(system_prompt(true, false, true).contains("调整语序"));
     }
 }

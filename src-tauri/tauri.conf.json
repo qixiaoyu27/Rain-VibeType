@@ -27,8 +27,8 @@
       {
         "label": "overlay",
         "url": "overlay.html",
-        "width": 440,
-        "height": 72,
+        "width": 390,
+        "height": 60,
         "visible": false,
         "focus": false,
         "focusable": false,
@@ -42,8 +42,8 @@
       {
         "label": "overlay-cancel",
         "url": "cancel.html",
-        "width": 77,
-        "height": 38,
+        "width": 70,
+        "height": 34,
         "visible": false,
         "focus": false,
         "focusable": false,

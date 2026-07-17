@@ -1386,8 +1386,16 @@ fn stop_recording(app: &AppHandle) -> Result<(), String> {
                         ),
                         text(
                             config_uses_english(&config),
-                            "本地小模型正在校对标点和分段",
-                            "The local text model is checking punctuation and paragraphs",
+                            if config.text_polish_rewrite {
+                                "本地小模型正在润色表达并校对标点"
+                            } else {
+                                "本地小模型正在校对标点和分段"
+                            },
+                            if config.text_polish_rewrite {
+                                "The local text model is polishing phrasing and punctuation"
+                            } else {
+                                "The local text model is checking punctuation and paragraphs"
+                            },
                         ),
                         0.0,
                     );
@@ -1451,6 +1459,7 @@ fn polish_text(app: &AppHandle, config: &Config, raw: &str) -> Result<String, St
         &model_file,
         raw,
         text_polish::TextPolishOptions {
+            rewrite: config.text_polish_rewrite,
             remove_fillers: config.text_polish_remove_fillers,
             paragraphs: config.text_polish_paragraphs,
             protected_terms: &config.text_polish_protected_terms,
@@ -1512,7 +1521,8 @@ fn finish_transcription(
         0.0,
     );
 
-    let recognized_text = transcription.text;
+    let recognized_text =
+        without_terminal_period(&transcription.text, config.remove_terminal_period);
     let injected = match target {
         Some(target) if target.is_still_active() => {
             Some(if config.injection_method == "clipboard" {
@@ -1575,6 +1585,30 @@ fn finish_transcription(
             }
         }
     }
+}
+
+fn without_terminal_period(text: &str, enabled: bool) -> String {
+    if !enabled {
+        return text.to_owned();
+    }
+    let trimmed = text.trim_end();
+    let content =
+        trimmed.trim_end_matches(['"', '\'', '”', '’', ')', '）', ']', '】', '》', '」', '』']);
+    let Some(period) = content
+        .chars()
+        .last()
+        .filter(|value| matches!(value, '.' | '。'))
+    else {
+        return text.to_owned();
+    };
+    if content.ends_with("...") {
+        return text.to_owned();
+    }
+    format!(
+        "{}{}",
+        &content[..content.len() - period.len_utf8()],
+        &text[content.len()..]
+    )
 }
 
 fn cancel(app: &AppHandle) -> Result<(), String> {
@@ -1882,7 +1916,7 @@ fn show_overlay(
             let (overlay_width, overlay_height) = window
                 .outer_size()
                 .map(|size| (size.width as i32, size.height as i32))
-                .unwrap_or(((440.0 * scale) as i32, (72.0 * scale) as i32));
+                .unwrap_or(((390.0 * scale) as i32, (60.0 * scale) as i32));
             let x = left + (width - overlay_width) / 2;
             let y = top + height - overlay_height - (20.0 * scale) as i32;
             let _ = window.set_position(PhysicalPosition::new(x, y));
@@ -1890,7 +1924,7 @@ fn show_overlay(
                 let (cancel_width, cancel_height) = cancel_window
                     .outer_size()
                     .map(|size| (size.width as i32, size.height as i32))
-                    .unwrap_or(((77.0 * scale) as i32, (38.0 * scale) as i32));
+                    .unwrap_or(((70.0 * scale) as i32, (34.0 * scale) as i32));
                 let cancel_x = x + (overlay_width - cancel_width - (13.0 * scale) as i32).max(0);
                 let cancel_y = y + ((overlay_height - cancel_height) / 2).max(0);
                 let _ = cancel_window.set_position(PhysicalPosition::new(cancel_x, cancel_y));
@@ -1922,7 +1956,7 @@ fn emit_overlay(app: &AppHandle, state_name: &str, title: &str, detail: &str, le
         .config
         .lock()
         .map(|config| config.overlay_opacity)
-        .unwrap_or(0.68);
+        .unwrap_or(0.10);
     let payload = OverlayStatus {
         state: state_name,
         title,
@@ -2547,5 +2581,16 @@ mod tests {
         assert!(detail.starts_with("00:03 · …"));
         assert!(detail.ends_with("七八九十"));
         assert_eq!(tail_text("实时预览", 24), "实时预览");
+    }
+
+    #[test]
+    fn optional_terminal_period_removal_preserves_other_punctuation_and_suffixes() {
+        assert_eq!(without_terminal_period("你好。", true), "你好");
+        assert_eq!(without_terminal_period("hello.", true), "hello");
+        assert_eq!(without_terminal_period("你好？", true), "你好？");
+        assert_eq!(without_terminal_period("“你好。”  ", true), "“你好”  ");
+        assert_eq!(without_terminal_period("hello...", true), "hello...");
+        assert_eq!(without_terminal_period("   ", true), "   ");
+        assert_eq!(without_terminal_period("你好。", false), "你好。");
     }
 }

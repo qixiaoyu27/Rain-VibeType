@@ -34,7 +34,7 @@ Confirmed on Windows 11 x64 through 2026-07-16:
 - PowerShell AST parsing of `scripts/release.ps1`, `scripts/build-native-runtime.ps1`, and `scripts/build-runtimes.ps1`
   - Confirms all release scripts are syntactically valid; release staging verifies both final SenseVoice and streaming-preview assets against `models.json`.
 - `npx tauri build --no-bundle`
-  - Builds the optimized Windows application after the streaming-preview, Home layout, and tray-click changes; the rebuilt `src-tauri/target/release/rain-input.exe` starts successfully.
+  - Builds the optimized Windows application after the streaming-preview, Home layout, tray-click, settings-header, and compact-overlay changes; the rebuilt `src-tauri/target/release/rain-input.exe` starts successfully.
 - `cargo build --release --manifest-path .\src-tauri\Cargo.toml`
   - Confirms the optimized Windows core, native-default runtime selection, per-file model URLs, frontend, playback ducking, clipboard code, and Tauri capabilities compile into `src-tauri/target/release/rain-input.exe`.
 - Native managed-runtime smoke check

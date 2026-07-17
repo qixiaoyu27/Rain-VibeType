@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-07-16
+Updated: 2026-07-17
 
 - Windows 11 x64 application code is at version `1.0.0`, is branded `雨音输入法` / `Rain Vibetype`, and defaults to Simplified Chinese.
 - The working tree contains local UI, logo, and optional text-polishing changes that have not yet been published to GitHub `main`.
@@ -41,3 +41,7 @@ Updated: 2026-07-16
 - Home now uses two matching status strips: inference device/current model above the test workspace and current hotkey/recording mode below it. The middle workspace stretches so the three right-side panels align with the full height of the left rail. The rebuilt release application is running with this layout.
 - The system-tray icon now opens and focuses the main panel on a single left click; the existing right-click context menu is unchanged. The rebuilt release application is running with this behavior.
 - All eight settings pages now use 26 px titles with a localized one-line description beneath them; the rebuilt release application is running with the updated headers.
+- The recording overlay is reduced to 390 x 60 and uses clear unblurred aqua glass instead of a milky light surface; all overlay text uses regular-weight Microsoft YaHei, and the recording-state label now has full text contrast.
+- New configurations default the overlay background transparency slider to 90%; existing saved values remain unchanged.
+- Overlay text and the cancel label use white Microsoft YaHei with a dark contrast shadow in both themes, matching the light border and remaining readable at 90% transparency.
+- The Home voice visual now uses a 61.8%-width waveform capped at 500 px and a 104 px microphone orb with a 46 px glyph, giving the waveform and microphone a more balanced golden-ratio-based hierarchy.

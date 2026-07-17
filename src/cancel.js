@@ -7,7 +7,7 @@ window.addEventListener("storage", () => {
 });
 listen("overlay-status", ({ payload }) => {
   document.documentElement.dataset.theme = localStorage.getItem("rain-theme") || "light";
-  button.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.68));
+  button.style.setProperty("--overlay-opacity", String(payload.opacity ?? 0.10));
 });
 
 async function getConfigWhenReady() {

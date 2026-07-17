@@ -25,7 +25,9 @@ pub struct Config {
     pub idle_timeout_seconds: u64,
     pub injection_method: String,
     pub restore_clipboard: bool,
+    pub remove_terminal_period: bool,
     pub text_polish_enabled: bool,
+    pub text_polish_rewrite: bool,
     pub text_polish_remove_fillers: bool,
     pub text_polish_paragraphs: bool,
     pub text_polish_protected_terms: Vec<String>,
@@ -63,14 +65,16 @@ impl Default for Config {
             idle_timeout_seconds: 600,
             injection_method: "clipboard".into(),
             restore_clipboard: true,
+            remove_terminal_period: false,
             text_polish_enabled: false,
+            text_polish_rewrite: false,
             text_polish_remove_fillers: false,
             text_polish_paragraphs: true,
             text_polish_protected_terms: Vec::new(),
             text_polish_idle_timeout_seconds: 600,
             show_overlay: true,
             show_overlay_fullscreen: true,
-            overlay_opacity: 0.68,
+            overlay_opacity: 0.10,
             start_sound: true,
             stop_sound: true,
             error_sound: true,
@@ -256,10 +260,12 @@ mod tests {
         assert_eq!(config.injection_method, "clipboard");
         assert_eq!(config.ui_language, "zh-CN");
         assert!(!config.duck_system_audio);
+        assert!(!config.remove_terminal_period);
         assert!(!config.text_polish_enabled);
+        assert!(!config.text_polish_rewrite);
         assert!(config.text_polish_paragraphs);
         assert!(config.autostart);
-        assert_eq!(config.overlay_opacity, 0.68);
+        assert_eq!(config.overlay_opacity, 0.10);
         assert!(config.validate().is_ok());
     }
 

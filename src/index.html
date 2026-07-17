@@ -81,7 +81,7 @@
           </section>
 
           <section id="voice" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_capture">录音采集</div><h1 data-i18n="voice_title">录音与快捷键</h1><p data-i18n="voice_page_description">设置录音方式、全局快捷键和麦克风输入。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_capture">录音采集</div><h1 data-i18n="voice_title">录音与快捷键</h1><p data-i18n="voice_page_description">设置录音方式、全局快捷键和麦克风输入。</p></div></div>
             <div class="settings-grid">
               <label class="field-card"><span data-i18n="recording_mode">录音方式</span><select id="recording-mode"><option value="push_to_talk" data-i18n="push_to_talk">按住说话，松开识别</option><option value="toggle" data-i18n="toggle_mode">按一次开始，再按一次结束</option></select></label>
               <div class="field-card"><span data-i18n="hotkey">全局快捷键</span><button id="hotkey-recorder" class="key-recorder" type="button">Ctrl + Shift + Space</button><small data-i18n="hotkey_hint">点击后按下新的组合键；注册失败会自动保留旧快捷键。</small></div>
@@ -93,19 +93,20 @@
           </section>
 
           <section id="output" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_output">文字投递</div><h1 data-i18n="output_page_title">文字写入</h1><p data-i18n="output_page_description">选择识别文字的写入方式与剪贴板保护策略。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_output">文字投递</div><h1 data-i18n="output_page_title">文字写入</h1><p data-i18n="output_page_description">选择识别文字的写入方式与剪贴板保护策略。</p></div></div>
             <div class="settings-grid">
               <label class="field-card"><span data-i18n="injection">输入方式</span><select id="injection-method"><option value="clipboard" data-i18n="clipboard_mode">剪贴板粘贴（推荐）</option><option value="typing" data-i18n="typing_mode">模拟逐字输入</option></select><small data-i18n="injection_hint">粘贴兼容性更好；逐字输入不会使用剪贴板，但速度较慢。</small></label>
               <label class="field-card switch-card"><span><b data-i18n="restore_clipboard">粘贴后恢复剪贴板</b><small data-i18n="restore_hint">若期间检测到用户复制了新内容，Rain 不会覆盖它。</small></span><input id="restore-clipboard" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="remove_terminal_period">去除结尾句号</b><small data-i18n="remove_terminal_period_hint">开启后自动去除识别结果末尾的“。”或“.”，其他标点保持不变。</small></span><input id="remove-terminal-period" type="checkbox" /></label>
             </div>
             <div class="callout"><span data-i18n="section_safety">安全保护</span><strong data-i18n="target_validation">目标窗口二次校验</strong><p data-i18n="target_hint">录音开始时记录输入位置；识别结束后若位置已变化，结果只复制到剪贴板，不会误写到其他窗口。</p></div>
           </section>
 
           <section id="feedback" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_feedback">反馈</div><h1 data-i18n="feedback_page_title">状态反馈</h1><p data-i18n="feedback_page_description">调整状态浮窗、显示透明度和操作提示音。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_feedback">反馈</div><h1 data-i18n="feedback_page_title">状态反馈</h1><p data-i18n="feedback_page_description">调整状态浮窗、显示透明度和操作提示音。</p></div></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="overlay">显示状态悬浮条</b><small data-i18n="overlay_hint">显示录音音量、时长、模型加载、识别和错误状态。</small></span><input id="show-overlay" type="checkbox" /></label>
-              <label class="field-card range-card"><span><b data-i18n="overlay_transparency">浮窗透明度</b><output id="overlay-transparency-value">32%</output></span><input id="overlay-transparency" type="range" min="0" max="100" step="1" value="32" /><small data-i18n="overlay_transparency_hint">只调整背景，文字和按钮保持清晰。</small></label>
+              <label class="field-card range-card"><span><b data-i18n="overlay_transparency">浮窗透明度</b><output id="overlay-transparency-value">90%</output></span><input id="overlay-transparency" type="range" min="0" max="100" step="1" value="90" /><small data-i18n="overlay_transparency_hint">只调整背景，文字和按钮保持清晰。</small></label>
               <label class="field-card switch-card"><span><b data-i18n="overlay_fullscreen">全屏应用中也显示</b><small data-i18n="overlay_fullscreen_hint">关闭后，全屏游戏或演示时只使用声音反馈。</small></span><input id="show-overlay-fullscreen" type="checkbox" /></label>
               <label class="field-card switch-card"><span><b data-i18n="start_sound">开始录音提示音</b></span><input id="start-sound" type="checkbox" /></label>
               <label class="field-card switch-card"><span><b data-i18n="stop_sound">结束录音提示音</b></span><input id="stop-sound" type="checkbox" /></label>
@@ -119,9 +120,10 @@
           </section>
 
           <section id="text-polish" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="text_polish">文本整理</div><h1 data-i18n="text_polish_page_title">文本整理</h1><p data-i18n="text_polish_page_description">使用本地小模型整理标点、分段和停顿词。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="text_polish">文本整理</div><h1 data-i18n="text_polish_page_title">文本整理</h1><p data-i18n="text_polish_page_description">使用本地小模型整理标点、分段和停顿词。</p></div></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="text_polish">文本整理</b><small data-i18n="text_polish_hint">识别后在本机整理标点和分段。</small></span><input id="text-polish-enabled" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="text_polish_rewrite">文本润色</b><small data-i18n="text_polish_rewrite_hint">轻度调整措辞、语序和重复表达，同时保护原意、数字、英文和受保护词。</small></span><input id="text-polish-rewrite" type="checkbox" /></label>
               <div class="field-card wide" id="text-polish-components">
                 <span data-i18n="text_polish_components">可选组件</span>
                 <small id="text-polish-status" aria-live="polite"></small>
@@ -139,7 +141,7 @@
           </section>
 
           <section id="runtime-settings" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="runtime_component">本地推理组件</div><h1 data-i18n="runtime_settings_title">推理设置</h1><p data-i18n="runtime_page_description">选择推理设备并管理模型的加载与卸载。</p></div><button class="primary save-config" data-i18n="save_model_settings">保存模型设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="runtime_component">本地推理组件</div><h1 data-i18n="runtime_settings_title">推理设置</h1><p data-i18n="runtime_page_description">选择推理设备并管理模型的加载与卸载。</p></div></div>
             <div class="settings-grid">
               <div class="field-card wide"><span data-i18n="storage_dir">模型存储目录</span><div class="path-row"><input id="model-storage-dir" readonly placeholder="使用应用默认目录" /><button id="pick-storage-dir" class="secondary" data-i18n="choose">选择</button><button id="reset-storage-dir" class="ghost" data-i18n="reset">恢复默认</button></div><small data-i18n="storage_hint">更改后只影响后续下载；已安装模型不会自动移动。</small></div>
               <label class="field-card"><span data-i18n="device">推理设备</span><select id="device-preference"><option value="auto" data-i18n="auto_device">自动选择</option><option value="cuda">CUDA</option><option value="cpu">CPU</option></select><small data-i18n="cpu_hint">CPU 模式功能完整，但大型模型的识别速度可能明显较慢。</small></label>
@@ -152,7 +154,7 @@
           </section>
 
           <section id="general" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_system">系统</div><h1 data-i18n="app_settings_title">应用设置</h1><p data-i18n="app_page_description">设置开机启动、界面语言和软件更新。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_system">系统</div><h1 data-i18n="app_settings_title">应用设置</h1><p data-i18n="app_page_description">设置开机启动、界面语言和软件更新。</p></div></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="autostart">登录 Windows 时启动</b><small data-i18n="autostart_hint">默认开启，应用启动后驻留系统托盘。</small></span><input id="autostart" type="checkbox" /></label>
               <label class="field-card switch-card"><span><b data-i18n="auto_update">启动时检查更新</b><small data-i18n="auto_update_hint">只检查签名更新，不会自动安装。</small></span><input id="auto-check-updates" type="checkbox" /></label>
@@ -162,7 +164,7 @@
           </section>
 
           <section id="privacy" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_privacy">隐私</div><h1 data-i18n="privacy_title">隐私与诊断</h1><p data-i18n="privacy_page_description">管理本地诊断、崩溃报告与日志导出。</p></div><button class="primary save-config" data-i18n="save">保存设置</button></div>
+            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_privacy">隐私</div><h1 data-i18n="privacy_title">隐私与诊断</h1><p data-i18n="privacy_page_description">管理本地诊断、崩溃报告与日志导出。</p></div></div>
             <div class="privacy-banner"><strong data-i18n="privacy_banner">默认不上传，不留录音，不留文字历史。</strong><p data-i18n="privacy_detail">诊断事件只记录错误代码、模型 ID 与耗时。导出前会列出文件并由你选择保存位置。</p></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="crash_reports">匿名崩溃报告</b><small data-i18n="crash_hint">默认关闭。当前构建只生成本地崩溃标记，不包含音频或识别文字。</small></span><input id="anonymous-crash-reports" type="checkbox" /></label>
