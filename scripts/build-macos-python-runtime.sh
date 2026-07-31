@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/artifacts/runtimes/macos}"
-VERSION="${RUNTIME_VERSION:-1.0.0}"
+VERSION="${RUNTIME_VERSION:-1.1.0}"
 TORCH_VERSION="${TORCH_VERSION:-2.11.0}"
 PYTHON="${PYTHON:-python3}"
 DOWNLOAD_BASE="${RUNTIME_DOWNLOAD_BASE:-https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download}"

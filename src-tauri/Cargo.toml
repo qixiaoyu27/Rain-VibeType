@@ -1,6 +1,6 @@
 [package]
 name = "rain-input"
-version = "1.0.0"
+version = "1.1.0"
 description = "Rain-Vibetype local-first voice input for Windows 11 and macOS"
 authors = ["Rain contributors"]
 license = "AGPL-3.0-only"

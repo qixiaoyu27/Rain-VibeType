@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/artifacts/runtimes/macos}"
-VERSION="${RUNTIME_VERSION:-1.0.0}"
+VERSION="${RUNTIME_VERSION:-1.1.0}"
 COMPONENT_ID="rain-runtime-onnx-cpu"
 ARCHIVE_NAME="rain-runtime-onnx-cpu-aarch64-apple-darwin.zip"
 ARCHIVE="$OUTPUT_DIR/$ARCHIVE_NAME"
