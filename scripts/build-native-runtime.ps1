@@ -52,7 +52,6 @@ $Component = [ordered]@{
     display_name = "Rain native CPU inference component"
     version = $RuntimeVersion
     accelerator = "cpu"
-    adapter_types = @("sensevoice", "streaming_zipformer")
     url = "$($ArtifactBaseUrl.TrimEnd('/'))/$ArchiveName"
     archive_size = [long]$ArchiveInfo.Length
     installed_size = [long](Get-Item -LiteralPath $PackagedWorker).Length

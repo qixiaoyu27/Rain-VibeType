@@ -99,7 +99,11 @@ impl Diagnostics {
         vec!["summary.json", "config.redacted.json", "recent-events.json"]
     }
 
-    pub fn pending_crash_report(&self, config: &Config) -> Option<serde_json::Value> {
+    pub fn pending_crash_report(
+        &self,
+        config: &Config,
+        backend: &str,
+    ) -> Option<serde_json::Value> {
         if !config.anonymous_crash_reports {
             return None;
         }
@@ -112,7 +116,7 @@ impl Diagnostics {
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "model_id": config.selected_model_id,
-            "backend": "local-python-worker"
+            "backend": backend
         }))
     }
 
@@ -162,4 +166,31 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_report_uses_the_actual_backend_label() {
+        let directory =
+            std::env::temp_dir().join(format!("rain-diagnostics-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("last-crash.json"),
+            r#"{"timestamp":1,"event":"APP_PANIC"}"#,
+        )
+        .unwrap();
+        let diagnostics = Diagnostics::new(directory.clone());
+        let config = Config {
+            anonymous_crash_reports: true,
+            ..Config::default()
+        };
+        let report = diagnostics
+            .pending_crash_report(&config, "managed:rain-runtime-onnx-cpu")
+            .unwrap();
+        assert_eq!(report["backend"], "managed:rain-runtime-onnx-cpu");
+        let _ = fs::remove_dir_all(directory);
+    }
 }

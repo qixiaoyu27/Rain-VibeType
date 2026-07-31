@@ -10,6 +10,16 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+MAX_AUDIO_BYTES = 3_600 * 16_000 * 2
+RUNTIME_DEPENDENCIES = (
+    "funasr",
+    "modelscope",
+    "numpy",
+    "torch",
+    "torchaudio",
+    "transformers",
+)
+
 
 def emit(event: str, request_id: str | None = None, **payload: Any) -> None:
     message = {"event": event, **payload}
@@ -39,17 +49,16 @@ class AsrAdapter(ABC):
         self.model_path = ""
         self.device = ""
 
-    def load(self, model_path: str, device: str, options: dict[str, Any]) -> None:
+    def load(self, model_path: str, device: str) -> None:
         path = Path(model_path)
         if not path.is_dir():
             raise FileNotFoundError(f"模型目录不存在：{path}")
         from funasr import AutoModel
 
-        resolved_device = resolve_device(device)
         with contextlib.redirect_stdout(sys.stderr):
-            self.model = AutoModel(model=str(path), device=resolved_device, **self.load_options(options))
+            self.model = AutoModel(model=str(path), device=device, **self.load_options())
         self.model_path = str(path)
-        self.device = resolved_device
+        self.device = device
 
     def transcribe(self, pcm: bytes, sample_rate: int) -> str:
         if self.model is None:
@@ -81,7 +90,7 @@ class AsrAdapter(ABC):
         return self.model is not None
 
     @abstractmethod
-    def load_options(self, options: dict[str, Any]) -> dict[str, Any]:
+    def load_options(self) -> dict[str, Any]:
         raise NotImplementedError
 
     @abstractmethod
@@ -90,7 +99,7 @@ class AsrAdapter(ABC):
 
 
 class SenseVoiceAdapter(AsrAdapter):
-    def load_options(self, _options: dict[str, Any]) -> dict[str, Any]:
+    def load_options(self) -> dict[str, Any]:
         return {"trust_remote_code": True, "disable_update": True}
 
     def generate_options(self, audio: Any, sample_rate: int) -> dict[str, Any]:
@@ -104,21 +113,23 @@ class SenseVoiceAdapter(AsrAdapter):
 
 
 class FunAsrNanoAdapter(AsrAdapter):
-    def load_options(self, _options: dict[str, Any]) -> dict[str, Any]:
+    def load_options(self) -> dict[str, Any]:
         return {"trust_remote_code": True, "disable_update": True}
 
     def generate_options(self, audio: Any, sample_rate: int) -> dict[str, Any]:
+        import torch
+
         return {
-            "input": [audio],
-            "fs": sample_rate,
+            "input": [torch.from_numpy(audio)],
             "cache": {},
             "batch_size": 1,
+            "language": "中文",
             "itn": True,
         }
 
 
 class ParaformerZhAdapter(AsrAdapter):
-    def load_options(self, _options: dict[str, Any]) -> dict[str, Any]:
+    def load_options(self) -> dict[str, Any]:
         return {"disable_update": True}
 
     def generate_options(self, audio: Any, sample_rate: int) -> dict[str, Any]:
@@ -151,6 +162,8 @@ def resolve_device(device: str) -> str:
 
 def error_code(error: Exception) -> str:
     message = str(error).lower()
+    if "audio_too_large" in message:
+        return "AUDIO_TOO_LARGE"
     if isinstance(error, FileNotFoundError):
         return "MODEL_NOT_INSTALLED"
     if "out of memory" in message or "cuda" in message and "memory" in message:
@@ -160,8 +173,27 @@ def error_code(error: Exception) -> str:
     return "WORKER_CRASHED"
 
 
-def transcription_should_commit(request_id: str, cancelled: set[str]) -> bool:
-    return request_id not in cancelled
+def adapter_needs_load(
+    adapter: AsrAdapter | None,
+    adapter_type: str,
+    requested_adapter: str,
+    model_path: str,
+    device: str,
+) -> bool:
+    return (
+        adapter is None
+        or adapter_type != requested_adapter
+        or adapter.model_path != model_path
+        or adapter.device != device
+        or not adapter.health_check()
+    )
+
+
+def validate_audio_bytes(value: Any) -> int:
+    audio_bytes = int(value)
+    if not 0 <= audio_bytes <= MAX_AUDIO_BYTES:
+        raise ValueError(f"AUDIO_TOO_LARGE：录音数据必须在 0 到 {MAX_AUDIO_BYTES} 字节之间")
+    return audio_bytes
 
 
 def read_message() -> tuple[dict[str, Any], bytes] | None:
@@ -169,7 +201,7 @@ def read_message() -> tuple[dict[str, Any], bytes] | None:
     if not line:
         return None
     message = json.loads(line)
-    audio_bytes = int(message.pop("audio_bytes", 0))
+    audio_bytes = validate_audio_bytes(message.pop("audio_bytes", 0))
     audio = sys.stdin.buffer.read(audio_bytes) if audio_bytes else b""
     if len(audio) != audio_bytes:
         raise EOFError("音频数据不完整")
@@ -179,7 +211,6 @@ def read_message() -> tuple[dict[str, Any], bytes] | None:
 def run() -> None:
     adapter: AsrAdapter | None = None
     adapter_type = ""
-    cancelled: set[str] = set()
     emit("worker_ready")
 
     while True:
@@ -194,7 +225,7 @@ def run() -> None:
             if command == "get_status":
                 missing_dependencies = [
                     name
-                    for name in ("funasr", "numpy", "torch", "torchaudio")
+                    for name in RUNTIME_DEPENDENCIES
                     if importlib.util.find_spec(name) is None
                 ]
                 emit(
@@ -210,18 +241,14 @@ def run() -> None:
             elif command == "load_model":
                 requested_adapter = str(message["adapter_type"])
                 model_path = str(message["model_path"])
-                device = str(message.get("device", "auto"))
-                if (
-                    adapter is None
-                    or adapter_type != requested_adapter
-                    or adapter.model_path != model_path
-                    or not adapter.health_check()
+                device = resolve_device(str(message.get("device", "auto")))
+                if adapter_needs_load(
+                    adapter, adapter_type, requested_adapter, model_path, device
                 ):
-                    emit("model_loading", request_id)
                     if adapter:
                         adapter.unload()
                     adapter = create_adapter(requested_adapter)
-                    adapter.load(model_path, device, message.get("options", {}))
+                    adapter.load(model_path, device)
                     adapter_type = requested_adapter
                 emit("model_ready", request_id, device=adapter.device)
             elif command == "unload_model":
@@ -230,25 +257,18 @@ def run() -> None:
                 adapter = None
                 adapter_type = ""
                 emit("model_unloaded", request_id)
-            elif command == "cancel":
-                cancelled.add(request_id)
-                emit("cancelled", request_id)
             elif command == "transcribe":
                 if adapter is None:
                     raise RuntimeError("模型尚未加载")
-                emit("transcription_started", request_id)
                 started = time.perf_counter()
                 text = adapter.transcribe(audio, int(message.get("sample_rate", 16000)))
-                if transcription_should_commit(request_id, cancelled):
-                    emit(
-                        "transcription_completed",
-                        request_id,
-                        text=text,
-                        language="auto",
-                        duration_ms=int(len(audio) / 2 / 16),
-                        inference_ms=int((time.perf_counter() - started) * 1000),
-                    )
-                cancelled.discard(request_id)
+                emit(
+                    "transcription_completed",
+                    request_id,
+                    text=text,
+                    duration_ms=int(len(audio) / 2 / 16),
+                    inference_ms=int((time.perf_counter() - started) * 1000),
+                )
             elif command == "shutdown":
                 if adapter:
                     adapter.unload()
@@ -270,6 +290,9 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     try:
         run()
     except Exception as error:

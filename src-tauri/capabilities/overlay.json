@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay-capability",
+  "description": "Rain status and cancel overlays",
+  "windows": ["overlay", "overlay-cancel"],
+  "permissions": ["core:event:allow-listen"]
+}

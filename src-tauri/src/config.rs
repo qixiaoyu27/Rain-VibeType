@@ -5,6 +5,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+const CURRENT_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
@@ -48,10 +50,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: CURRENT_SCHEMA_VERSION,
             onboarding_completed: false,
             recording_mode: "push_to_talk".into(),
-            hotkey: "Ctrl+Shift+Space".into(),
+            hotkey: default_hotkey().into(),
             max_recording_seconds: 60,
             input_device: None,
             duck_system_audio: false,
@@ -87,11 +89,50 @@ impl Default for Config {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn default_hotkey() -> &'static str {
+    "Super+Shift+Space"
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_hotkey() -> &'static str {
+    "Ctrl+Shift+Space"
+}
+
 impl Config {
+    pub fn normalize_loaded_for_platform(&mut self) -> bool {
+        let mut changed = false;
+        if self.schema_version == 1 {
+            #[cfg(target_os = "macos")]
+            if self.hotkey == "Ctrl+Shift+Space" {
+                self.hotkey = default_hotkey().into();
+            }
+            self.schema_version = CURRENT_SCHEMA_VERSION;
+            changed = true;
+        }
+        #[cfg(target_os = "macos")]
+        if self.device_preference == "cuda" {
+            self.device_preference = "auto".into();
+            changed = true;
+        }
+        changed
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema_version != 1 {
+        if self.schema_version != CURRENT_SCHEMA_VERSION {
             return Err("不支持的配置版本".into());
         }
+        self.validate_values()
+    }
+
+    fn validate_loaded(&self) -> Result<(), String> {
+        if !matches!(self.schema_version, 1 | CURRENT_SCHEMA_VERSION) {
+            return Err("不支持的配置版本".into());
+        }
+        self.validate_values()
+    }
+
+    fn validate_values(&self) -> Result<(), String> {
         if !matches!(self.recording_mode.as_str(), "push_to_talk" | "toggle") {
             return Err("录音方式无效".into());
         }
@@ -163,7 +204,7 @@ pub fn load(path: &Path) -> Config {
         return Config::default();
     };
     match serde_json::from_slice::<Config>(&bytes) {
-        Ok(config) if config.validate().is_ok() => config,
+        Ok(config) if config.validate_loaded().is_ok() => config,
         _ => {
             let stamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -245,17 +286,29 @@ mod tests {
     }
 
     #[test]
-    fn old_schema_one_config_receives_new_defaults() {
+    fn old_schema_one_config_is_loaded_then_migrated_once() {
+        let directory = std::env::temp_dir().join(format!("rain-config-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("config.json");
         let old = r#"{
           "schema_version": 1,
           "recording_mode": "toggle",
+          "hotkey": "Ctrl+Shift+Space",
           "max_recording_seconds": 60,
           "input_device": null,
           "model_path": "",
           "python_path": "python",
           "device_preference": "cpu"
         }"#;
-        let config: Config = serde_json::from_str(old).unwrap();
+        fs::write(&path, old).unwrap();
+        let mut config = load(&path);
+        assert_eq!(config.schema_version, 1);
+        assert!(path.exists());
+        assert!(config.normalize_loaded_for_platform());
+        assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
+        #[cfg(target_os = "macos")]
+        assert_eq!(config.hotkey, "Super+Shift+Space");
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(config.hotkey, "Ctrl+Shift+Space");
         assert_eq!(config.injection_method, "clipboard");
         assert_eq!(config.ui_language, "zh-CN");
@@ -267,6 +320,19 @@ mod tests {
         assert!(config.autostart);
         assert_eq!(config.overlay_opacity, 0.10);
         assert!(config.validate().is_ok());
+        assert!(!config.normalize_loaded_for_platform());
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn schema_two_preserves_user_selected_control_hotkey() {
+        let mut config = Config {
+            hotkey: "Ctrl+Shift+Space".into(),
+            ..Config::default()
+        };
+        assert!(!config.normalize_loaded_for_platform());
+        assert_eq!(config.hotkey, "Ctrl+Shift+Space");
     }
 
     #[test]
@@ -285,7 +351,7 @@ mod tests {
         let path = directory.join("config.json");
         fs::write(&path, b"{not-json").unwrap();
         let loaded = load(&path);
-        assert_eq!(loaded.hotkey, "Ctrl+Shift+Space");
+        assert_eq!(loaded.hotkey, default_hotkey());
         assert!(!path.exists());
         assert!(fs::read_dir(&directory)
             .unwrap()

@@ -4,20 +4,52 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::mpsc::{self, Receiver, RecvTimeoutError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError},
+        Arc, Mutex,
+    },
     time::Duration,
 };
+
+const MAX_AUDIO_BYTES: usize = 3_600 * 16_000 * 2;
 
 #[derive(Debug, Serialize)]
 pub struct Transcription {
     pub text: String,
-    pub language: String,
     pub duration_ms: u64,
     pub inference_ms: u64,
 }
 
+#[derive(Clone)]
+pub(crate) struct WorkerCanceller {
+    child: Arc<Mutex<Option<Child>>>,
+    requested: Arc<AtomicBool>,
+}
+
+impl WorkerCanceller {
+    pub fn cancel(&self) -> Result<(), String> {
+        self.requested.store(true, Ordering::Release);
+        let mut child = self.child.lock().map_err(|_| "Worker 进程状态损坏")?;
+        let Some(child) = child.as_mut() else {
+            return Ok(());
+        };
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(());
+        }
+        child
+            .kill()
+            .map_err(|error| format!("无法取消 Worker：{error}"))
+    }
+}
+
 pub struct WorkerClient {
-    child: Option<Child>,
+    child: Arc<Mutex<Option<Child>>>,
+    cancel_requested: Arc<AtomicBool>,
     stdin: Option<ChildStdin>,
     events: Option<Receiver<Result<String, String>>>,
     python_path: String,
@@ -27,14 +59,15 @@ pub struct WorkerClient {
     consecutive_crashes: u8,
     restart_blocked: bool,
     read_timeout: Duration,
-    #[cfg(windows)]
-    job: Option<crate::platform_windows::KillOnDropJob>,
+    #[cfg(any(windows, target_os = "macos"))]
+    job: Option<crate::platform::KillOnDropJob>,
 }
 
 impl WorkerClient {
     pub fn new(script_path: PathBuf, bundled_worker: PathBuf) -> Self {
         Self {
-            child: None,
+            child: Arc::new(Mutex::new(None)),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
             stdin: None,
             events: None,
             python_path: String::new(),
@@ -44,8 +77,15 @@ impl WorkerClient {
             consecutive_crashes: 0,
             restart_blocked: false,
             read_timeout: Duration::from_secs(600),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             job: None,
+        }
+    }
+
+    pub fn canceller(&self) -> WorkerCanceller {
+        WorkerCanceller {
+            child: self.child.clone(),
+            requested: self.cancel_requested.clone(),
         }
     }
 
@@ -71,7 +111,9 @@ impl WorkerClient {
                         .filter_map(Value::as_str)
                         .collect::<Vec<_>>()
                         .join(", "))
-                    .unwrap_or_else(|| "funasr / numpy / torch".into())
+                    .unwrap_or_else(|| {
+                        "funasr / modelscope / numpy / torch / torchaudio / transformers".into()
+                    })
             ));
         }
         let ready = response["model_ready"].as_bool().unwrap_or(false);
@@ -109,14 +151,14 @@ impl WorkerClient {
         if self.loaded_model.as_ref() == Some(&desired) {
             return Ok(());
         }
+        self.loaded_model = None;
         self.send(
             serde_json::json!({
                 "command": "load_model",
                 "request_id": request_id,
                 "model_path": model_path,
                 "adapter_type": adapter_type,
-                "device": device,
-                "options": {}
+                "device": device
             }),
             &[],
         )?;
@@ -130,7 +172,8 @@ impl WorkerClient {
         request_id: &str,
         pcm: Vec<i16>,
     ) -> Result<Transcription, String> {
-        let mut bytes = Vec::with_capacity(pcm.len() * 2);
+        let byte_len = pcm_byte_len(pcm.len())?;
+        let mut bytes = Vec::with_capacity(byte_len);
         for sample in pcm {
             bytes.extend_from_slice(&sample.to_le_bytes());
         }
@@ -155,7 +198,6 @@ impl WorkerClient {
         }
         Ok(Transcription {
             text,
-            language: response["language"].as_str().unwrap_or("zh").to_owned(),
             duration_ms: response["duration_ms"].as_u64().unwrap_or(0),
             inference_ms: response["inference_ms"].as_u64().unwrap_or(0),
         })
@@ -180,7 +222,8 @@ impl WorkerClient {
         sample_rate: u32,
         pcm: Vec<i16>,
     ) -> Result<String, String> {
-        let mut bytes = Vec::with_capacity(pcm.len() * 2);
+        let byte_len = pcm_byte_len(pcm.len())?;
+        let mut bytes = Vec::with_capacity(byte_len);
         for sample in pcm {
             bytes.extend_from_slice(&sample.to_le_bytes());
         }
@@ -211,7 +254,7 @@ impl WorkerClient {
     }
 
     pub fn unload(&mut self) -> Result<(), String> {
-        if self.child.is_none() || self.loaded_model.is_none() {
+        if !self.has_child()? || self.loaded_model.is_none() {
             self.loaded_model = None;
             return Ok(());
         }
@@ -229,7 +272,15 @@ impl WorkerClient {
         self.stop();
     }
 
+    fn has_child(&self) -> Result<bool, String> {
+        self.child
+            .lock()
+            .map(|child| child.is_some())
+            .map_err(|_| "Worker 进程状态损坏".into())
+    }
+
     fn ensure_started(&mut self, python_path: &str) -> Result<(), String> {
+        self.cancellation_checkpoint()?;
         if self.restart_blocked {
             return Err(
                 "WORKER_CRASHED：Worker 连续崩溃，已停止自动重启；请在诊断页执行 Worker 检查后重试"
@@ -243,12 +294,14 @@ impl WorkerClient {
             resolve_executable(python_path)
         };
         let runtime_identity = executable.to_string_lossy().into_owned();
-        let had_child = self.child.is_some();
-        let running = self
-            .child
-            .as_mut()
-            .map(|child| child.try_wait().ok().flatten().is_none())
-            .unwrap_or(false);
+        let (had_child, running) = {
+            let mut child = self.child.lock().map_err(|_| "Worker 进程状态损坏")?;
+            let had_child = child.is_some();
+            let running = child
+                .as_mut()
+                .is_some_and(|child| child.try_wait().ok().flatten().is_none());
+            (had_child, running)
+        };
         if running && self.python_path == runtime_identity {
             return Ok(());
         }
@@ -256,10 +309,12 @@ impl WorkerClient {
             self.note_crash();
             if self.restart_blocked {
                 self.stop();
+                self.cancellation_checkpoint()?;
                 return Err("WORKER_CRASHED：Worker 连续崩溃，已停止自动重启；请检查模型、推理设备或诊断信息".into());
             }
         }
         self.stop();
+        self.cancellation_checkpoint()?;
         let mut command = Command::new(&executable);
         if !bundled {
             command.arg(&self.script_path);
@@ -274,9 +329,15 @@ impl WorkerClient {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
+                self.cancellation_checkpoint()?;
                 self.note_crash();
                 return Err(format!(
                     "无法启动推理 Worker（{}）：{error}",
@@ -287,12 +348,20 @@ impl WorkerClient {
         #[cfg(windows)]
         let job = {
             use std::os::windows::io::AsRawHandle;
-            match crate::platform_windows::KillOnDropJob::attach(child.as_raw_handle()) {
+            match crate::platform::KillOnDropJob::attach(child.as_raw_handle()) {
                 Ok(job) => job,
                 Err(error) => {
                     let _ = child.kill();
                     return Err(error);
                 }
+            }
+        };
+        #[cfg(target_os = "macos")]
+        let job = match crate::platform::KillOnDropJob::attach(child.id()) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                return Err(error);
             }
         };
         let stdin = child.stdin.take().ok_or("无法连接 Worker 输入")?;
@@ -316,15 +385,16 @@ impl WorkerClient {
                 }
             }
         });
-        self.child = Some(child);
+        *self.child.lock().map_err(|_| "Worker 进程状态损坏")? = Some(child);
         self.stdin = Some(stdin);
         self.events = Some(receiver);
         self.python_path = runtime_identity;
         self.loaded_model = None;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             self.job = Some(job);
         }
+        self.cancellation_checkpoint()?;
 
         let ready = self.read_event()?;
         if ready["event"] != "worker_ready" {
@@ -336,11 +406,21 @@ impl WorkerClient {
     }
 
     fn send(&mut self, message: Value, audio: &[u8]) -> Result<(), String> {
-        let stdin = self.stdin.as_mut().ok_or("Worker 未启动")?;
-        serde_json::to_writer(&mut *stdin, &message).map_err(|error| error.to_string())?;
-        stdin.write_all(b"\n").map_err(|error| error.to_string())?;
-        stdin.write_all(audio).map_err(|error| error.to_string())?;
-        stdin.flush().map_err(|error| error.to_string())
+        self.cancellation_checkpoint()?;
+        if audio.len() > MAX_AUDIO_BYTES {
+            return Err(format!(
+                "AUDIO_TOO_LARGE：录音数据超过 {} 字节限制",
+                MAX_AUDIO_BYTES
+            ));
+        }
+        let result = (|| {
+            let stdin = self.stdin.as_mut().ok_or("Worker 未启动")?;
+            serde_json::to_writer(&mut *stdin, &message).map_err(|error| error.to_string())?;
+            stdin.write_all(b"\n").map_err(|error| error.to_string())?;
+            stdin.write_all(audio).map_err(|error| error.to_string())?;
+            stdin.flush().map_err(|error| error.to_string())
+        })();
+        result.map_err(|error| self.stop_with_error(error))
     }
 
     fn read_until(&mut self, request_id: &str, accepted: &[&str]) -> Result<Value, String> {
@@ -371,19 +451,15 @@ impl WorkerClient {
             let line = match received {
                 Ok(Ok(line)) => line,
                 Ok(Err(error)) => {
-                    self.note_crash();
-                    self.stop();
-                    return Err(format!("WORKER_CRASHED：读取 Worker 失败：{error}"));
+                    return Err(
+                        self.stop_with_error(format!("WORKER_CRASHED：读取 Worker 失败：{error}"))
+                    );
                 }
                 Err(RecvTimeoutError::Timeout) => {
-                    self.note_crash();
-                    self.stop();
-                    return Err("WORKER_CRASHED：Worker 响应超时".into());
+                    return Err(self.stop_with_error("WORKER_CRASHED：Worker 响应超时".into()));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    self.note_crash();
-                    self.stop();
-                    return Err("WORKER_CRASHED：Worker 已退出".into());
+                    return Err(self.stop_with_error("WORKER_CRASHED：Worker 已退出".into()));
                 }
             };
             if let Ok(message) = serde_json::from_str(&line) {
@@ -396,6 +472,29 @@ impl WorkerClient {
         self.consecutive_crashes = self.consecutive_crashes.saturating_add(1);
         if self.consecutive_crashes >= 3 {
             self.restart_blocked = true;
+        }
+    }
+
+    fn cancellation_checkpoint(&mut self) -> Result<(), String> {
+        if self.cancel_requested.swap(false, Ordering::AcqRel) {
+            self.stop();
+            Err("CANCELLED".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn stop_with_error(&mut self, error: String) -> String {
+        let mut cancelled = self.cancel_requested.swap(false, Ordering::AcqRel);
+        self.stop();
+        cancelled |= self.cancel_requested.swap(false, Ordering::AcqRel);
+        if !cancelled {
+            self.note_crash();
+        }
+        if cancelled {
+            "CANCELLED".into()
+        } else {
+            error
         }
     }
 
@@ -412,7 +511,12 @@ impl WorkerClient {
             false
         };
         drop(self.stdin.take());
-        if let Some(mut child) = self.child.take() {
+        let child = self
+            .child
+            .lock()
+            .map(|mut child| child.take())
+            .unwrap_or(None);
+        if let Some(mut child) = child {
             let deadline = std::time::Instant::now() + Duration::from_millis(500);
             while shutdown_sent
                 && child.try_wait().ok().flatten().is_none()
@@ -424,9 +528,9 @@ impl WorkerClient {
                 let _ = child.kill();
             }
             let _ = child.wait();
-            #[cfg(windows)]
-            drop(self.job.take());
         }
+        #[cfg(any(windows, target_os = "macos"))]
+        drop(self.job.take());
         self.events = None;
         self.loaded_model = None;
     }
@@ -436,6 +540,19 @@ impl Drop for WorkerClient {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn pcm_byte_len(samples: usize) -> Result<usize, String> {
+    let bytes = samples
+        .checked_mul(std::mem::size_of::<i16>())
+        .ok_or("AUDIO_TOO_LARGE：录音数据长度溢出")?;
+    if bytes > MAX_AUDIO_BYTES {
+        return Err(format!(
+            "AUDIO_TOO_LARGE：录音数据超过 {} 字节限制",
+            MAX_AUDIO_BYTES
+        ));
+    }
+    Ok(bytes)
 }
 
 pub fn install_script(path: &Path) -> std::io::Result<()> {
@@ -487,6 +604,14 @@ mod tests {
     }
 
     #[test]
+    fn audio_limit_matches_the_public_one_hour_setting() {
+        assert_eq!(pcm_byte_len(3_600 * 16_000).unwrap(), MAX_AUDIO_BYTES);
+        assert!(pcm_byte_len(3_600 * 16_000 + 1)
+            .unwrap_err()
+            .starts_with("AUDIO_TOO_LARGE"));
+    }
+
+    #[test]
     fn ipc_handshake_request_ids_and_binary_audio_round_trip() {
         if !python_available() {
             return;
@@ -513,14 +638,16 @@ while True:
     request_id = message.get("request_id", "")
     command = message.get("command")
     if command == "load_model":
-        emit("model_ready", request_id, device="cpu")
-        emit("model_ready", request_id, device="cpu")
+        if message.get("model_path") == "broken":
+            emit("worker_error", request_id, code="MODEL_LOAD_FAILED", message="broken")
+        else:
+            emit("model_ready", request_id, device="cpu")
+            emit("model_ready", request_id, device="cpu")
     elif command == "transcribe":
-        emit("transcription_started", "late-request")
-        emit("transcription_completed", request_id, text=str(len(audio)), language="en", duration_ms=1, inference_ms=2)
+        emit("transcription_completed", request_id, text=str(len(audio)), duration_ms=1, inference_ms=2)
     elif command == "preview_start": emit("preview_started", request_id)
     elif command == "preview_audio": emit("preview_partial", request_id, text=str(len(audio)))
-    elif command == "preview_finish": emit("preview_completed", request_id, text="")
+    elif command == "preview_finish": emit("preview_completed", request_id)
     elif command == "unload_model": emit("model_unloaded", request_id)
     elif command == "shutdown":
         open("{shutdown_marker_for_python}", "w", encoding="utf-8").write("ok")
@@ -530,8 +657,26 @@ while True:
         )
         .unwrap();
         let mut worker = WorkerClient::new(script, directory.join("missing.exe"));
+        let canceller = worker.canceller();
+        canceller.cancel().unwrap();
+        assert_eq!(
+            worker
+                .load_model("python", "cancelled-load", "model", "sensevoice", "cpu")
+                .unwrap_err(),
+            "CANCELLED"
+        );
+        assert!(!worker.has_child().unwrap());
+        assert_eq!(worker.consecutive_crashes, 0);
         worker
             .load_model("python", "load-1", "model", "sensevoice", "cpu")
+            .unwrap();
+        assert!(worker
+            .load_model("python", "load-broken", "broken", "sensevoice", "cpu")
+            .unwrap_err()
+            .contains("MODEL_LOAD_FAILED"));
+        assert!(worker.loaded_model.is_none());
+        worker
+            .load_model("python", "load-2", "model", "sensevoice", "cpu")
             .unwrap();
         let result = worker
             .transcribe_loaded("request-1", vec![1_i16, 2_i16, 3_i16])
@@ -587,7 +732,91 @@ while True:
             .load_model("python", "load-timeout", "model", "sensevoice", "cpu")
             .unwrap_err();
         assert!(error.contains("响应超时"));
-        assert!(worker.child.is_none());
+        assert!(!worker.has_child().unwrap());
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn send_failure_stops_the_child_and_clears_the_model_cache() {
+        if !python_available() {
+            return;
+        }
+        let directory =
+            std::env::temp_dir().join(format!("rain-send-failure-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("closed_stdin_worker.py");
+        std::fs::write(
+            &script,
+            r#"import json, os, sys, time
+def emit(event, request_id=None, **data):
+    value = {"event": event, **data}
+    if request_id is not None: value["request_id"] = request_id
+    sys.stdout.write(json.dumps(value) + "\n"); sys.stdout.flush()
+emit("worker_ready")
+line = sys.stdin.buffer.readline()
+message = json.loads(line)
+emit("model_ready", message.get("request_id", ""), device="cpu")
+os.close(sys.stdin.fileno())
+time.sleep(30)
+"#,
+        )
+        .unwrap();
+        let mut worker = WorkerClient::new(script, directory.join("missing.exe"));
+        worker
+            .load_model("python", "load", "model", "sensevoice", "cpu")
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(worker.transcribe_loaded("request", vec![1_i16]).is_err());
+        assert!(worker.loaded_model.is_none());
+        assert!(!worker.has_child().unwrap());
+        assert_eq!(worker.consecutive_crashes, 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn cancellation_kills_the_worker_without_counting_as_a_crash() {
+        if !python_available() {
+            return;
+        }
+        let directory = std::env::temp_dir().join(format!("rain-cancel-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("slow_worker.py");
+        std::fs::write(
+            &script,
+            r#"import json, sys, time
+def emit(event, request_id=None, **data):
+    value = {"event": event, **data}
+    if request_id is not None: value["request_id"] = request_id
+    sys.stdout.write(json.dumps(value) + "\n"); sys.stdout.flush()
+emit("worker_ready")
+while True:
+    line = sys.stdin.buffer.readline()
+    if not line: break
+    message = json.loads(line)
+    audio = sys.stdin.buffer.read(int(message.get("audio_bytes", 0)))
+    request_id = message.get("request_id", "")
+    if message.get("command") == "load_model":
+        emit("model_ready", request_id, device="cpu")
+    elif message.get("command") == "transcribe":
+        time.sleep(30)
+"#,
+        )
+        .unwrap();
+        let mut worker = WorkerClient::new(script, directory.join("missing.exe"));
+        worker
+            .load_model("python", "load", "model", "sensevoice", "cpu")
+            .unwrap();
+        let canceller = worker.canceller();
+        let task = std::thread::spawn(move || {
+            let result = worker.transcribe_loaded("cancel-me", vec![1_i16]);
+            (worker, result)
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        canceller.cancel().unwrap();
+        let (worker, result) = task.join().unwrap();
+        assert_eq!(result.unwrap_err(), "CANCELLED");
+        assert_eq!(worker.consecutive_crashes, 0);
+        assert!(!worker.has_child().unwrap());
         let _ = std::fs::remove_dir_all(directory);
     }
 }

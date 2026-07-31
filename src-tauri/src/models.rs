@@ -7,10 +7,14 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
+    thread,
+    time::Duration,
 };
 use zip::ZipArchive;
 
 const MODELSCOPE_USER_AGENT: &str = concat!("RainVibetype/", env!("CARGO_PKG_VERSION"));
+const MAX_STALLED_DOWNLOAD_ATTEMPTS: usize = 5;
+const DOWNLOAD_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 fn manifest_is_unpublished(status: StatusCode) -> bool {
     status == StatusCode::NOT_FOUND
@@ -149,8 +153,43 @@ impl ModelRepository {
             .ok_or_else(|| format!("未知模型：{model_id}"))
     }
 
-    pub fn manifest_version(&self) -> &str {
-        &self.manifest.manifest_version
+    pub fn platform_definition(&self, model_id: &str) -> Result<ModelDefinition, String> {
+        let mut definition = self.definition(model_id)?.clone();
+        adapt_definition_for_platform(&mut definition);
+        Ok(definition)
+    }
+
+    pub fn installed_definition(
+        &self,
+        model_id: &str,
+        path: &Path,
+    ) -> Result<ModelDefinition, String> {
+        let current = self.definition(model_id)?;
+        let marker = read_marker(path)
+            .ok_or("MODEL_INTEGRITY_FAILED：模型缺少或包含无效的 Rain 安装标记")?;
+        if marker.model_id != model_id {
+            return Err("MODEL_INTEGRITY_FAILED：模型类型与安装标记不一致".into());
+        }
+        let mut definition = marker_definition(&marker, current)?.clone();
+        adapt_definition_for_platform(&mut definition);
+        Ok(definition)
+    }
+
+    pub fn installed_definitions(&self, model_id: &str) -> Result<Vec<ModelDefinition>, String> {
+        let model = self.definition(model_id)?;
+        self.installation_paths(model)
+            .iter()
+            .map(|path| self.installed_definition(model_id, path))
+            .collect()
+    }
+
+    pub fn has_managed_models(&self) -> Result<bool, String> {
+        for model in &self.manifest.models {
+            if !self.installed_definitions(&model.id)?.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub fn refresh_manifest(&self, endpoint: &str) -> Result<bool, String> {
@@ -214,7 +253,8 @@ impl ModelRepository {
             .models
             .iter()
             .cloned()
-            .map(|definition| {
+            .map(|mut definition| {
+                adapt_definition_for_platform(&mut definition);
                 let path = self.install_path(&definition);
                 let installed = path.join(".rain-model.json").is_file();
                 let custom_path = self.custom_path(&definition);
@@ -251,30 +291,18 @@ impl ModelRepository {
             .collect()
     }
 
-    pub fn models_using_runtime(&self, component_id: &str) -> Vec<String> {
-        self.list()
-            .into_iter()
-            .filter_map(|card| {
-                if !matches!(
-                    card.state.as_str(),
-                    "installed" | "custom" | "update_available"
-                ) {
-                    return None;
-                }
-                let installed_definition = card
-                    .installed_path
-                    .as_deref()
-                    .and_then(|path| read_marker(Path::new(path)))
-                    .and_then(|marker| marker.definition)
-                    .filter(|definition| !definition.runtime.components.is_empty());
-                installed_definition
-                    .as_ref()
-                    .unwrap_or(&card.definition)
-                    .runtime
-                    .uses(component_id)
-                    .then_some(card.definition.id)
-            })
-            .collect()
+    pub fn models_using_runtime(&self, component_id: &str) -> Result<Vec<String>, String> {
+        let mut models = Vec::new();
+        for model in &self.manifest.models {
+            if self
+                .installed_definitions(&model.id)?
+                .iter()
+                .any(|definition| definition.runtime.uses(component_id))
+            {
+                models.push(model.id.clone());
+            }
+        }
+        Ok(models)
     }
 
     pub fn installed_path(&self, model_id: &str) -> Result<PathBuf, String> {
@@ -330,7 +358,7 @@ impl ModelRepository {
         let staging = final_dir.with_extension("incomplete");
         fs::create_dir_all(&staging).map_err(|error| format!("无法创建模型目录：{error}"))?;
         let remaining = remaining_bytes(&staging, &model);
-        if let Some(free) = crate::platform_windows::free_disk_space(&staging) {
+        if let Some(free) = crate::platform::free_disk_space(&staging) {
             if free < remaining.saturating_add(256 * 1024 * 1024) {
                 return Err(format!(
                     "磁盘空间不足：还需要至少 {:.1} GB",
@@ -562,6 +590,19 @@ impl ModelRepository {
         installations
     }
 
+    fn installation_paths(&self, model: &ModelDefinition) -> Vec<PathBuf> {
+        let mut paths = [self.install_path(model), self.custom_path(model)]
+            .into_iter()
+            .filter(|path| read_marker(path).is_some())
+            .collect::<Vec<_>>();
+        paths.extend(
+            self.previous_installations(model)
+                .into_iter()
+                .map(|(path, _)| path),
+        );
+        paths
+    }
+
     fn persist_current_definitions(&self) -> Result<(), String> {
         for model in &self.manifest.models {
             let path = self.install_path(model);
@@ -586,6 +627,28 @@ impl ModelRepository {
         Ok(())
     }
 }
+
+#[cfg(target_os = "macos")]
+fn adapt_definition_for_platform(definition: &mut ModelDefinition) {
+    definition.recommended_hardware = match definition.id.as_str() {
+        "sensevoice-small" => "Apple Silicon M1 或更新 / 8 GB 内存".into(),
+        "streaming-zipformer-preview" => "Apple Silicon M1 或更新 / 8 GB 内存".into(),
+        "qwen3-0-6b-text" => "Apple Silicon M1 或更新 / 8 GB 内存 / Metal".into(),
+        "fun-asr-nano" => "Apple Silicon / 建议 16 GB 内存；兼容 Worker 模式".into(),
+        "paraformer-zh" => "Apple Silicon / 8 GB 内存；兼容 Worker 模式".into(),
+        _ => definition.recommended_hardware.clone(),
+    };
+    if definition.runtime.repository == "text" {
+        definition.runtime.components.clear();
+        definition
+            .runtime
+            .components
+            .insert("cpu".into(), "llama-text-cpu-macos-arm64".into());
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn adapt_definition_for_platform(_definition: &mut ModelDefinition) {}
 
 fn validate_manifest(manifest: &ModelManifest) -> Result<(), String> {
     if manifest.schema_version != 2 || manifest.models.len() < 3 {
@@ -732,7 +795,10 @@ fn validate_installed_sizes(
 
 fn path_from_manifest(value: &str) -> Result<PathBuf, String> {
     let path = Path::new(value);
-    if path.is_absolute()
+    if value.is_empty()
+        || value.contains('\\')
+        || value.as_bytes().get(1) == Some(&b':')
+        || path.is_absolute()
         || path.components().any(|component| {
             matches!(
                 component,
@@ -775,10 +841,10 @@ fn download_file(
     paused: &AtomicBool,
     mut progress: impl FnMut(u64),
 ) -> Result<(), String> {
-    let mut existing = part.metadata().map(|value| value.len()).unwrap_or(0);
-    if existing > file.size {
+    let mut current = part.metadata().map(|value| value.len()).unwrap_or(0);
+    if current > file.size {
         fs::remove_file(part).map_err(|error| error.to_string())?;
-        existing = 0;
+        current = 0;
     }
     let url = if let Some(url) = &file.url {
         Url::parse(url).map_err(|error| error.to_string())?
@@ -793,44 +859,87 @@ fn download_file(
             .append_pair("FilePath", &file.path);
         url
     };
-    let mut request = client.get(url);
-    if existing > 0 {
-        request = request.header(RANGE, format!("bytes={existing}-"));
-    }
-    let mut response = request
-        .send()
-        .map_err(|error| format!("模型下载失败：{error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("模型下载失败：HTTP {}", response.status()));
-    }
-    let resumed = response.status() == StatusCode::PARTIAL_CONTENT;
-    let mut output = if resumed {
-        OpenOptions::new().create(true).append(true).open(part)
-    } else {
-        existing = 0;
-        File::create(part)
-    }
-    .map_err(|error| format!("无法写入模型文件：{error}"))?;
     let mut buffer = vec![0u8; 1024 * 1024];
-    let mut current = existing;
-    loop {
+    let mut stalled_attempts = 0usize;
+    while current < file.size {
         if paused.load(Ordering::Relaxed) {
-            output.flush().map_err(|error| error.to_string())?;
             return Err("DOWNLOAD_PAUSED：下载已暂停".into());
         }
-        let count = response
-            .read(&mut buffer)
-            .map_err(|error| format!("读取模型下载失败：{error}"))?;
-        if count == 0 {
+        let attempt_start = current;
+        let mut request = client.get(url.clone());
+        if current > 0 {
+            request = request.header(RANGE, format!("bytes={current}-"));
+        }
+        let mut response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                stalled_attempts += 1;
+                if stalled_attempts >= MAX_STALLED_DOWNLOAD_ATTEMPTS {
+                    return Err(format!("模型下载失败：{error}"));
+                }
+                thread::sleep(DOWNLOAD_RETRY_DELAY);
+                continue;
+            }
+        };
+        if !response.status().is_success() {
+            return Err(format!("模型下载失败：HTTP {}", response.status()));
+        }
+        let resumed = response.status() == StatusCode::PARTIAL_CONTENT;
+        let mut output = if current > 0 && resumed {
+            OpenOptions::new().create(true).append(true).open(part)
+        } else {
+            current = 0;
+            File::create(part)
+        }
+        .map_err(|error| format!("无法写入模型文件：{error}"))?;
+        let mut read_error = None;
+        loop {
+            if paused.load(Ordering::Relaxed) {
+                output.flush().map_err(|error| error.to_string())?;
+                return Err("DOWNLOAD_PAUSED：下载已暂停".into());
+            }
+            let count = match response.read(&mut buffer) {
+                Ok(count) => count,
+                Err(error) => {
+                    read_error = Some(error);
+                    break;
+                }
+            };
+            if count == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..count])
+                .map_err(|error| format!("写入模型下载失败：{error}"))?;
+            current = current.saturating_add(count as u64);
+            if current > file.size {
+                return Err(format!(
+                    "模型文件大小超出清单：{}（期望 {}，实际至少 {}）",
+                    file.path, file.size, current
+                ));
+            }
+            progress(current);
+        }
+        output.flush().map_err(|error| error.to_string())?;
+        if current == file.size {
             break;
         }
-        output
-            .write_all(&buffer[..count])
-            .map_err(|error| format!("写入模型下载失败：{error}"))?;
-        current += count as u64;
-        progress(current);
+        if current > attempt_start {
+            stalled_attempts = 0;
+        } else {
+            stalled_attempts += 1;
+        }
+        if stalled_attempts >= MAX_STALLED_DOWNLOAD_ATTEMPTS {
+            return Err(match read_error {
+                Some(error) => format!("读取模型下载失败：{error}"),
+                None => format!(
+                    "模型文件大小不符：{}（期望 {}，实际 {}）",
+                    file.path, file.size, current
+                ),
+            });
+        }
+        thread::sleep(DOWNLOAD_RETRY_DELAY);
     }
-    output.flush().map_err(|error| error.to_string())?;
     if current != file.size {
         return Err(format!(
             "模型文件大小不符：{}（期望 {}，实际 {}）",
@@ -968,6 +1077,10 @@ fn cleanup_import_staging(root: &Path, parent: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    fn hash_file_for(bytes: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
     fn tiny_model(hash: &str) -> ModelDefinition {
         ModelDefinition {
             id: "tiny".into(),
@@ -1098,17 +1211,18 @@ mod tests {
         }
 
         assert_eq!(
-            repository.models_using_runtime("rain-runtime-cpu"),
+            repository.models_using_runtime("rain-runtime-cpu").unwrap(),
             ["fun-asr-nano", "paraformer-zh"]
         );
         repository.delete("fun-asr-nano").unwrap();
         assert_eq!(
-            repository.models_using_runtime("rain-runtime-cpu"),
+            repository.models_using_runtime("rain-runtime-cpu").unwrap(),
             ["paraformer-zh"]
         );
         repository.delete("paraformer-zh").unwrap();
         assert!(repository
             .models_using_runtime("rain-runtime-cpu")
+            .unwrap()
             .is_empty());
         let _ = fs::remove_dir_all(root);
     }
@@ -1131,6 +1245,104 @@ mod tests {
         assert!(verify_files(&directory, &tiny_model(&correct)).is_ok());
         assert!(verify_files(&directory, &tiny_model(&"f".repeat(64))).is_err());
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn installed_marker_definition_drives_validation_and_runtime_resolution() {
+        let root = std::env::temp_dir().join(format!("rain-marker-{}", uuid::Uuid::new_v4()));
+        let mut installed = tiny_model(&hash_file_for(b"old"));
+        installed.model_version = "old".into();
+        installed.download_size = 3;
+        installed.installed_size = 3;
+        installed.files[0].size = 3;
+        installed.runtime.components = BTreeMap::from([("cpu".into(), "old-runtime".into())]);
+        let mut current = installed.clone();
+        current.model_version = "new".into();
+        current.files[0].size = 10;
+        current.runtime.components = BTreeMap::from([("cpu".into(), "new-runtime".into())]);
+        let repository = ModelRepository {
+            manifest: ModelManifest {
+                schema_version: 2,
+                manifest_version: "new".into(),
+                models: vec![current],
+            },
+            root: root.clone(),
+        };
+        let path = root.join("tiny").join("old");
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("weights.bin"), b"old").unwrap();
+        let marker = InstallMarker {
+            schema_version: 1,
+            manifest_version: "old".into(),
+            model_id: "tiny".into(),
+            model_version: "old".into(),
+            verified: true,
+            definition: Some(installed),
+        };
+        fs::write(
+            path.join(".rain-model.json"),
+            serde_json::to_vec(&marker).unwrap(),
+        )
+        .unwrap();
+
+        repository.validate_loadable("tiny", &path).unwrap();
+        assert_eq!(
+            repository
+                .installed_definition("tiny", &path)
+                .unwrap()
+                .runtime
+                .component_for("cpu"),
+            Some("old-runtime")
+        );
+        assert_eq!(
+            repository.models_using_runtime("old-runtime").unwrap(),
+            ["tiny"]
+        );
+        assert!(repository
+            .models_using_runtime("new-runtime")
+            .unwrap()
+            .is_empty());
+        assert!(repository.has_managed_models().unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installed_text_marker_uses_the_macos_runtime_mapping() {
+        let root = std::env::temp_dir().join(format!("rain-text-marker-{}", uuid::Uuid::new_v4()));
+        let repository = ModelRepository::new(root.clone()).unwrap();
+        let definition = repository.definition("qwen3-0-6b-text").unwrap().clone();
+        let path = repository.install_path(&definition);
+        fs::create_dir_all(&path).unwrap();
+        let marker = InstallMarker {
+            schema_version: 1,
+            manifest_version: repository.manifest.manifest_version.clone(),
+            model_id: definition.id.clone(),
+            model_version: definition.model_version.clone(),
+            verified: true,
+            definition: Some(definition),
+        };
+        fs::write(
+            path.join(".rain-model.json"),
+            serde_json::to_vec(&marker).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            repository
+                .installed_definition("qwen3-0-6b-text", &path)
+                .unwrap()
+                .runtime
+                .component_for("cpu"),
+            Some("llama-text-cpu-macos-arm64")
+        );
+        assert_eq!(
+            repository
+                .models_using_runtime("llama-text-cpu-macos-arm64")
+                .unwrap(),
+            ["qwen3-0-6b-text"]
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1185,10 +1397,15 @@ mod tests {
             old_path
         );
         assert_eq!(
-            updated.models_using_runtime("rain-runtime-onnx-cpu"),
+            updated
+                .models_using_runtime("rain-runtime-onnx-cpu")
+                .unwrap(),
             ["sensevoice-small"]
         );
-        assert!(updated.models_using_runtime("future-runtime").is_empty());
+        assert!(updated
+            .models_using_runtime("future-runtime")
+            .unwrap()
+            .is_empty());
         updated
             .delete_previous_versions(&card.definition.id)
             .unwrap();

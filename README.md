@@ -6,11 +6,12 @@
 
 ### 按住快捷键，说完即写入。
 
-本地优先的 Windows 11 语音输入工具：录音、识别与文本处理都在本机完成。
+本地优先的 Windows 11 / macOS Apple Silicon 语音输入工具：录音、识别与文本处理都在本机完成。
 
 [![Release](https://img.shields.io/github/v/release/qixiaoyu27/Rain-VibeType?display_name=tag&style=flat-square&color=0e7490)](https://github.com/qixiaoyu27/Rain-VibeType/releases)
 [![Downloads](https://img.shields.io/github/downloads/qixiaoyu27/Rain-VibeType/total?style=flat-square&color=0e7490)](https://github.com/qixiaoyu27/Rain-VibeType/releases)
 [![Platform](https://img.shields.io/badge/Windows%2011-x64-0e7490?style=flat-square&logo=windows11&logoColor=white)](#系统要求)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&logo=apple&logoColor=white)](#系统要求)
 [![License](https://img.shields.io/github/license/qixiaoyu27/Rain-VibeType?style=flat-square&color=0e7490)](LICENSE)
 
 [下载测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) · [快速开始](#快速开始) · [隐私](#隐私承诺) · [参与开发](#参与开发)
@@ -35,8 +36,26 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) 下载 `Rain-Vibetype_*_x64-setup.exe`。
-2. 安装后启动 Rain，按引导选择并下载模型。
+### macOS Apple Silicon
+
+1. 从 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) 下载 Apple Silicon `.dmg`，拖入“应用程序”。
+2. 首次启动时允许麦克风；第一次录音前，按提示在“系统设置 → 隐私与安全性 → 辅助功能”中允许 Rain。
+3. 按引导下载 Apple Silicon 原生推理组件和模型。
+4. 将光标放到任意输入框，按住 `⌘ + ⇧ + Space` 说话；松开后文字会安全写回原应用。
+
+> 当前 macOS 测试版使用本地签名且未经过 Apple 公证。请先核对 Release 页面提供的 SHA-256；若 Gatekeeper 阻止启动，只解除 Rain 自身的隔离标记：
+>
+> ```bash
+> sudo xattr -dr com.apple.quarantine "/Applications/雨音输入法.app"
+> open "/Applications/雨音输入法.app"
+> ```
+>
+> 该命令不会全局关闭 Gatekeeper。重新下载新版本后可能需要再次执行，并重新确认麦克风与辅助功能权限。
+
+### Windows 11
+
+1. 下载 `Rain-Vibetype_*_x64-setup.exe` 并安装。
+2. 启动 Rain，按引导选择并下载模型。
 3. 将光标放到任意输入框，按住 `Ctrl + Shift + Space` 说话；松开后文字会写入当前应用。
 
 > 当前首个 Windows 预览版未使用商业代码签名证书。请只从本仓库 Releases 下载；若 Windows SmartScreen 提示，请先核对发布者和文件 SHA-256，再自行决定是否运行。
@@ -53,14 +72,15 @@
 
 ## 系统要求
 
-- Windows 11 x64
-- Intel / AMD CPU；NVIDIA 显卡可选，用于 CUDA 推理组件
-- 麦克风、WebView2，以及首次下载模型时的网络连接
+- macOS 12 或更新版本，Apple Silicon M1 / M2 / M3 / M4 或更新芯片
+- 或 Windows 11 x64，Intel / AMD CPU；NVIDIA 显卡可选
+- 麦克风；macOS 还需要辅助功能权限，Windows 需要 WebView2
+- 首次下载模型与可选推理组件时需要网络连接
 - 建议至少预留 10 GB 磁盘空间；实际取决于所选模型与推理组件
 
 ## 测试版说明
 
-此仓库的首个 Release 先提供 Windows 安装包，便于体验界面、热键、录音和基础流程。
+macOS 与 Windows 使用同一套录音、识别、目标复核和剪贴板保护状态机；平台层分别使用 AppKit / Accessibility / CoreGraphics 与 Win32 API。
 
 完整离线识别还依赖单独发布的原生运行时与模型资产。它们不会被静默下载，也不会被打进安装包；发布前会进行 SHA-256 校验与干净机器验证。请以 Release 页面列出的可用资产和说明为准。
 
@@ -79,6 +99,22 @@ npm install
 npm run dev
 ```
 
+`setup-worker.ps1` 会把项目虚拟环境加入当前 PowerShell 会话的 `PATH`；请在同一终端运行 `npm run dev`。
+
+Apple Silicon Mac：
+
+```bash
+./scripts/run-macos.sh
+```
+
+生成 Apple Silicon 原生 Worker 发布资产和 `.app` / `.dmg`：
+
+```bash
+./scripts/build-macos.sh
+```
+
+构建成功后会为 DMG、App 压缩包和 Runtime 生成同名 `.sha256` 文件，发布时一并上传。
+
 常用检查：
 
 ```powershell
@@ -90,6 +126,7 @@ node --check .\src\main.js
 ```
 
 macOS Apple Silicon 的迁移边界见 [MACOS_MIGRATION.md](docs/MACOS_MIGRATION.md)。
+完整 macOS 验收清单见 [MACOS_ACCEPTANCE.md](docs/MACOS_ACCEPTANCE.md)。
 
 ## License
 

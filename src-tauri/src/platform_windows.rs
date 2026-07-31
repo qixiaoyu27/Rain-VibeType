@@ -1,4 +1,5 @@
 use std::{ffi::c_void, mem::size_of, path::Path, ptr, thread, time::Duration};
+use tauri::WebviewWindow;
 use windows::Win32::{
     Foundation::RPC_E_CHANGED_MODE,
     Media::Audio::{
@@ -66,7 +67,15 @@ pub fn system_prefers_english() -> bool {
     language & 0x03ff != 0x0004
 }
 
-pub fn show_without_activation(window: isize) -> Result<(), String> {
+pub fn ensure_accessibility_permission() -> Result<(), String> {
+    Ok(())
+}
+
+pub fn show_without_activation(window: &WebviewWindow, _interactive: bool) -> Result<(), String> {
+    let window = window
+        .hwnd()
+        .map_err(|error| format!("无法读取状态悬浮窗句柄：{error}"))?
+        .0 as isize;
     let shown = unsafe {
         SetWindowPos(
             window as *mut _,
@@ -88,9 +97,11 @@ pub fn show_without_activation(window: isize) -> Result<(), String> {
     }
 }
 
-pub fn hide_window(window: isize) {
-    unsafe {
-        ShowWindow(window as *mut _, SW_HIDE);
+pub fn hide_window(window: &WebviewWindow) {
+    if let Ok(window) = window.hwnd() {
+        unsafe {
+            ShowWindow(window.0, SW_HIDE);
+        }
     }
 }
 
@@ -285,7 +296,10 @@ impl InputTarget {
     }
 }
 
-pub fn type_text(text: &str) -> Result<(), String> {
+pub fn type_text(target: InputTarget, text: &str) -> Result<(), String> {
+    if !target.is_still_active() {
+        return Err("INPUT_TARGET_CHANGED：原输入位置已切换".into());
+    }
     let units = text.encode_utf16().collect::<Vec<_>>();
     let mut inputs = Vec::with_capacity(units.len() * 2);
     for unit in units {
@@ -315,7 +329,10 @@ pub fn type_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn paste_text(text: &str, restore_clipboard: bool) -> Result<(), String> {
+pub fn paste_text(target: InputTarget, text: &str, restore_clipboard: bool) -> Result<(), String> {
+    if !target.is_still_active() {
+        return Err("INPUT_TARGET_CHANGED：原输入位置已切换".into());
+    }
     let original = restore_clipboard.then(capture_clipboard).transpose()?;
     copy_text(text)?;
     let written_sequence = unsafe { GetClipboardSequenceNumber() };
@@ -555,6 +572,14 @@ pub fn copy_text(text: &str) -> Result<(), String> {
         unsafe { GlobalFree(memory) };
         Err("无法更新剪贴板".into())
     }
+}
+
+pub fn open_path(path: &Path) -> Result<(), String> {
+    std::process::Command::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("无法打开目录：{error}"))
 }
 
 fn key_input(virtual_key: u16, scan: u16, flags: u32) -> INPUT {
