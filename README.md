@@ -6,14 +6,15 @@
 
 ### 按住快捷键，说完即写入。
 
-本地优先的 Windows 11 语音输入工具：录音、识别与文本处理都在本机完成。
+本地优先的 Windows 11 / macOS Apple Silicon 语音输入工具：录音、识别与文本处理都在本机完成。
 
 [![Release](https://img.shields.io/github/v/release/qixiaoyu27/Rain-VibeType?display_name=tag&style=flat-square&color=0e7490)](https://github.com/qixiaoyu27/Rain-VibeType/releases)
 [![Downloads](https://img.shields.io/github/downloads/qixiaoyu27/Rain-VibeType/total?style=flat-square&color=0e7490)](https://github.com/qixiaoyu27/Rain-VibeType/releases)
 [![Platform](https://img.shields.io/badge/Windows%2011-x64-0e7490?style=flat-square&logo=windows11&logoColor=white)](#系统要求)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&logo=apple&logoColor=white)](#系统要求)
 [![License](https://img.shields.io/github/license/qixiaoyu27/Rain-VibeType?style=flat-square&color=0e7490)](LICENSE)
 
-[下载测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) · [快速开始](#快速开始) · [隐私](#隐私承诺) · [参与开发](#参与开发)
+[Windows 下载](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) · [macOS Preview](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) · [快速开始](#快速开始) · [隐私](#隐私承诺) · [参与开发](#参与开发)
 
 </div>
 
@@ -35,6 +36,17 @@
 
 ## 快速开始
 
+### macOS Apple Silicon（Preview）
+
+1. 从 [macOS v1.1.0 Preview 1](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) 下载 `Rain-VibeType-1.1.0-macOS-arm64.dmg`，将“雨音输入法”拖入“应用程序”。
+2. 首次启动时允许麦克风；第一次录音前，按提示在“系统设置 → 隐私与安全性 → 辅助功能”中允许雨音输入法。
+3. 按引导下载 Apple Silicon 原生推理组件和模型。
+4. 将光标放到任意输入框，按住 `⌘ + ⇧ + Space` 说话；松开后文字会安全写回原应用。
+
+> 当前 macOS Preview 使用临时签名，尚未经过 Apple Developer ID 签名和公证。若 Gatekeeper 阻止启动，请在 Finder 中右键应用并选择“打开”，或前往“系统设置 → 隐私与安全性”允许打开。该版本仅支持 Apple Silicon，不支持 Intel Mac。
+
+### Windows 11
+
 1. 从 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases/latest) 下载 `Rain-Vibetype_*_x64-setup.exe`。
 2. 安装后启动 Rain，按引导选择并下载模型。
 3. 将光标放到任意输入框，按住 `Ctrl + Shift + Space` 说话；松开后文字会写入当前应用。
@@ -53,14 +65,15 @@
 
 ## 系统要求
 
-- Windows 11 x64
-- Intel / AMD CPU；NVIDIA 显卡可选，用于 CUDA 推理组件
-- 麦克风、WebView2，以及首次下载模型时的网络连接
+- macOS 12 或更新版本，Apple Silicon M1 或更新芯片
+- 或 Windows 11 x64，Intel / AMD CPU；NVIDIA 显卡可选
+- 麦克风；macOS 还需要辅助功能权限，Windows 需要 WebView2
+- 首次下载模型与可选推理组件时需要网络连接
 - 建议至少预留 10 GB 磁盘空间；实际取决于所选模型与推理组件
 
 ## 测试版说明
 
-此仓库的首个 Release 先提供 Windows 安装包，便于体验界面、热键、录音和基础流程。
+Releases 已提供 Windows x64 安装包与 macOS Apple Silicon Preview。macOS 版本的源码和后续更新维护在 [`Mac` 分支](https://github.com/qixiaoyu27/Rain-VibeType/tree/Mac)。
 
 完整离线识别还依赖单独发布的原生运行时与模型资产。它们不会被静默下载，也不会被打进安装包；发布前会进行 SHA-256 校验与干净机器验证。请以 Release 页面列出的可用资产和说明为准。
 
@@ -89,7 +102,7 @@ python -m unittest worker.test_worker -v
 node --check .\src\main.js
 ```
 
-macOS Apple Silicon 的迁移边界见 [MACOS_MIGRATION.md](docs/MACOS_MIGRATION.md)。
+macOS Apple Silicon 的源码、构建脚本与验收文档见 [`Mac` 分支](https://github.com/qixiaoyu27/Rain-VibeType/tree/Mac)。
 
 ## License
 
