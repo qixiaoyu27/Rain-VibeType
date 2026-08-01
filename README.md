@@ -142,9 +142,8 @@ python -m unittest worker.test_worker -v
 node .\scripts\check-frontend.mjs
 ```
 
-macOS 迁移边界、验收清单和实测证据：
+macOS 验收清单和实测证据：
 
-- [macOS 迁移说明](docs/MACOS_MIGRATION.md)
 - [macOS 验收清单](docs/MACOS_ACCEPTANCE.md)
 - [macOS 验收结果](docs/MACOS_ACCEPTANCE_RESULTS.md)
 
