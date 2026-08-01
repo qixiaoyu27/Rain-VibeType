@@ -142,11 +142,6 @@ python -m unittest worker.test_worker -v
 node .\scripts\check-frontend.mjs
 ```
 
-macOS 验收清单和实测证据：
-
-- [macOS 验收清单](docs/MACOS_ACCEPTANCE.md)
-- [macOS 验收结果](docs/MACOS_ACCEPTANCE_RESULTS.md)
-
 ## 许可证
 
 Rain Vibetype 采用 [GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）。
