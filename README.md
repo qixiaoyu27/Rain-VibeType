@@ -20,17 +20,16 @@
 
 ---
 
-## macOS 首次启动（重要）
+## 为什么是 Rain
 
-> [!IMPORTANT]
-> macOS Preview 使用临时签名，尚未经过 Apple Developer ID 签名和公证。请先确认应用来自本仓库 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) 并核对 SHA-256；安装到“应用程序”后，在终端执行：
->
-> ```bash
-> sudo xattr -dr com.apple.quarantine "/Applications/雨音输入法.app"
-> open "/Applications/雨音输入法.app"
-> ```
->
-> 这两条命令只解除“雨音输入法”自身的隔离标记，不会关闭系统的全局 Gatekeeper。当前 macOS 版本仅支持 Apple Silicon，不支持 Intel Mac。
+| 你在意的事 | Rain 的做法 |
+| --- | --- |
+| 隐私 | 音频和识别文本只在内存与本地模型中处理，不上传、不保存历史。 |
+| 速度 | 默认使用原生 Rust / sherpa-onnx Worker；模型加载后无需等待云端请求。 |
+| 不打断工作 | 录音前记住目标应用，完成后仅在目标仍安全时写入，否则保留到剪贴板。 |
+| 剪贴板安全 | 粘贴前完整快照；用户期间复制了新内容时，Rain 不会覆盖。 |
+| 轻量安装 | 基础应用不捆绑模型和大型运行时，只下载你明确选择的组件。 |
+| 灵活选择 | 支持多种本地识别模型、实时预览和可选的本地文本整理。 |
 
 ## 本地识别有多快
 
@@ -89,6 +88,18 @@ Fun-ASR Nano 和 Paraformer 更偏向模型能力与兼容性，速度和内存�
 | --- | --- | --- | --- |
 | macOS | macOS 12+、Apple Silicon M1 或更新芯片 | `⌘ + ⇧ + Space` | [v1.1.0 Preview 1](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) |
 | Windows | Windows 11 x64 | `Ctrl + Shift + Space` | [v1.0.0 测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) |
+
+### macOS 首次启动
+
+> [!IMPORTANT]
+> macOS Preview 使用临时签名，尚未经过 Apple Developer ID 签名和公证。请先确认应用来自本仓库 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) 并核对 SHA-256；安装到“应用程序”后，在终端执行：
+>
+> ```bash
+> sudo xattr -dr com.apple.quarantine "/Applications/雨音输入法.app"
+> open "/Applications/雨音输入法.app"
+> ```
+>
+> 这两条命令只解除“雨音输入法”自身的隔离标记，不会关闭系统的全局 Gatekeeper。当前 macOS 版本仅支持 Apple Silicon，不支持 Intel Mac。
 
 ## 隐私与安全边界
 
