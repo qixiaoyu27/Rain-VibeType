@@ -14,7 +14,7 @@
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&logo=apple&logoColor=white)](#获取版本)
 [![License](https://img.shields.io/github/license/qixiaoyu27/Rain-VibeType?style=flat-square&color=0e7490)](LICENSE)
 
-[Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) · [本地速度](#本地识别有多快) · [功能](#核心能力) · [模型](#支持的模型) · [隐私](#隐私与安全边界)
+[跨平台发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) · [本地速度](#本地识别有多快) · [功能](#核心能力) · [模型](#支持的模型) · [隐私](#隐私与安全边界)
 
 </div>
 
@@ -82,12 +82,12 @@ Fun-ASR Nano 和 Paraformer 更偏向模型能力与兼容性，速度和内存�
 
 ## 获取版本
 
-安装包、SHA-256、版本说明和已知限制统一放在 [GitHub Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases)，README 不重复维护下载文件列表。
+Windows 与 macOS 安装包、SHA-256、版本说明和已知限制统一放在 [跨平台发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1)，历史版本仍可在 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) 查看。
 
 | 平台 | 系统要求 | 默认快捷键 | 发布状态 |
 | --- | --- | --- | --- |
 | macOS | macOS 12+、Apple Silicon M1 或更新芯片 | `⌘ + ⇧ + Space` | [v1.1.0 Preview 1](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) |
-| Windows | Windows 11 x64 | `Ctrl + Shift + Space` | [v1.0.0 测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) |
+| Windows | Windows 11 x64 | `Ctrl + Shift + Space` | [v1.0.0 测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) |
 
 ### macOS 首次启动
 
