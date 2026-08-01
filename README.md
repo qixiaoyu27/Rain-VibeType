@@ -14,7 +14,7 @@
 [![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-0e7490?style=flat-square&logo=apple&logoColor=white)](#获取版本)
 [![License](https://img.shields.io/github/license/qixiaoyu27/Rain-VibeType?style=flat-square&color=0e7490)](LICENSE)
 
-[跨平台发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) · [本地速度](#本地识别有多快) · [功能](#核心能力) · [模型](#支持的模型) · [隐私](#隐私与安全边界)
+[v1.0.0](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) · [本地速度](#本地识别有多快) · [功能](#核心能力) · [模型](#支持的模型) · [隐私](#隐私与安全边界)
 
 </div>
 
@@ -39,7 +39,7 @@ Rain 的默认 SenseVoice 路径由原生 Rust / sherpa-onnx Worker 执行。模
 
 | 测试环境 | 模型与输入 | 结果 |
 | --- | --- | --- |
-| MacBook Pro · Apple M1 Pro · 16 GB | v1.1.0 macOS Preview 1 发布的 SenseVoice Small ONNX；5.616 秒中文音频；连续 10 次热模型推理 | 中位数 **107.5 ms**，范围 **107–110 ms**，约 **52.2× 实时速度** |
+| MacBook Pro · Apple M1 Pro · 16 GB | v1.0.0 使用的 SenseVoice Small ONNX；5.616 秒中文音频；连续 10 次热模型推理 | 中位数 **107.5 ms**，范围 **107–110 ms**，约 **52.2× 实时速度** |
 
 本次单独启动 Worker 后的模型加载耗时为 **790 ms**，10 次识别文本完全一致。以上数字只统计模型推理，不包含录音时长、首次下载、应用启动和最终写入；不同芯片、模型与音频内容会有差异。
 
@@ -82,17 +82,17 @@ Fun-ASR Nano 和 Paraformer 更偏向模型能力与兼容性，速度和内存�
 
 ## 获取版本
 
-Windows 与 macOS 安装包、SHA-256、版本说明和已知限制统一放在 [跨平台发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1)，历史版本仍可在 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) 查看。
+Windows 与 macOS 安装包、SHA-256、版本说明和已知限制统一放在 [v1.0.0 发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0)。
 
 | 平台 | 系统要求 | 默认快捷键 | 发布状态 |
 | --- | --- | --- | --- |
-| macOS | macOS 12+、Apple Silicon M1 或更新芯片 | `⌘ + ⇧ + Space` | [v1.1.0 Preview 1](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) |
-| Windows | Windows 11 x64 | `Ctrl + Shift + Space` | [v1.0.0 测试版](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.1.0-mac.1) |
+| macOS | macOS 12+、Apple Silicon M1 或更新芯片 | `⌘ + ⇧ + Space` | [v1.0.0](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) |
+| Windows | Windows 11 x64 | `Ctrl + Shift + Space` | [v1.0.0](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) |
 
 ### macOS 首次启动
 
 > [!IMPORTANT]
-> macOS Preview 使用临时签名，尚未经过 Apple Developer ID 签名和公证。请先确认应用来自本仓库 [Releases](https://github.com/qixiaoyu27/Rain-VibeType/releases) 并核对 SHA-256；安装到“应用程序”后，在终端执行：
+> macOS 版使用临时签名，尚未经过 Apple Developer ID 签名和公证。请先确认应用来自本仓库 [v1.0.0 发布页](https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0) 并核对 SHA-256；安装到“应用程序”后，在终端执行：
 >
 > ```bash
 > sudo xattr -dr com.apple.quarantine "/Applications/雨音输入法.app"
