@@ -110,20 +110,6 @@ Fun-ASR Nano 和 Paraformer 更偏向模型能力与兼容性，速度和内存�
 - 文本整理失败、超时或改变事实时，保留原始识别结果。
 - 诊断包由用户主动导出，不作为默认数据采集渠道。
 
-## 常见问题
-
-### 日常识别需要联网吗？
-
-不需要。模型和运行时安装完成后，语音识别与可选文本整理都在本机执行；首次下载组件和检查更新时需要网络连接。
-
-### 为什么 Windows 会显示 SmartScreen 提示？
-
-Windows 测试版尚未使用商业代码签名证书。请从 Release 页面下载，并在运行前核对页面提供的 SHA-256。
-
-### Intel Mac 可以使用吗？
-
-不可以。当前 macOS 版本只构建和验证了 Apple Silicon arm64。
-
 ## License
 
 Rain Vibetype 采用 [GNU Affero General Public License v3.0](LICENSE)（`AGPL-3.0-only`）。
