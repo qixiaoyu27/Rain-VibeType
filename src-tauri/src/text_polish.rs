@@ -24,8 +24,8 @@ struct ServerProcess {
     idle_timeout_seconds: u64,
     port: u16,
     api_key: String,
-    #[cfg(windows)]
-    _job: crate::platform_windows::KillOnDropJob,
+    #[cfg(any(windows, target_os = "macos"))]
+    _job: crate::platform::KillOnDropJob,
 }
 
 pub struct TextPolisher {
@@ -180,18 +180,31 @@ impl TextPolisher {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000);
         }
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         let mut child = command
             .spawn()
             .map_err(|error| format!("TEXT_POLISH_RUNTIME_FAILED：无法启动 llama.cpp：{error}"))?;
         #[cfg(windows)]
         let job = {
             use std::os::windows::io::AsRawHandle;
-            match crate::platform_windows::KillOnDropJob::attach(child.as_raw_handle()) {
+            match crate::platform::KillOnDropJob::attach(child.as_raw_handle()) {
                 Ok(job) => job,
                 Err(error) => {
                     let _ = child.kill();
                     return Err(error);
                 }
+            }
+        };
+        #[cfg(target_os = "macos")]
+        let job = match crate::platform::KillOnDropJob::attach(child.id()) {
+            Ok(job) => job,
+            Err(error) => {
+                let _ = child.kill();
+                return Err(error);
             }
         };
         let started = Instant::now();
@@ -225,7 +238,7 @@ impl TextPolisher {
             idle_timeout_seconds,
             port,
             api_key,
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             _job: job,
         });
         Ok(())

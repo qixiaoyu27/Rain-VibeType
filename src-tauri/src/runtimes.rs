@@ -1,12 +1,13 @@
 use reqwest::{blocking::Client, header::RANGE, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(not(target_os = "macos"))]
+use std::sync::OnceLock;
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    sync::OnceLock,
     time::Duration,
 };
 use zip::ZipArchive;
@@ -55,7 +56,6 @@ pub struct RuntimeStatus {
     pub nvidia_detected: bool,
     pub nvidia_name: Option<String>,
     pub recommended_accelerator: String,
-    pub recommended_component_id: Option<String>,
     pub active_component_id: Option<String>,
     pub active_executable: Option<String>,
     pub components: Vec<RuntimeCard>,
@@ -209,7 +209,6 @@ impl RuntimeRepository {
             recommended_accelerator: recommended_component
                 .map(|component| component.accelerator.clone())
                 .unwrap_or(accelerator),
-            recommended_component_id: recommended_component.map(|component| component.id.clone()),
             active_component_id,
             active_executable,
             components,
@@ -268,7 +267,7 @@ impl RuntimeRepository {
         let remaining = component
             .archive_size
             .saturating_sub(existing.min(component.archive_size));
-        if let Some(free) = crate::platform_windows::free_disk_space(&downloads) {
+        if let Some(free) = crate::platform::free_disk_space(&downloads) {
             let required = remaining
                 .saturating_add(component.installed_size)
                 .saturating_add(256 * 1024 * 1024);
@@ -296,6 +295,7 @@ impl RuntimeRepository {
             &archive,
             &staging,
             component.installed_size.saturating_mul(2),
+            archive_format(component)?,
         )?;
         let executable = staging.join(relative_path(&component.executable)?);
         if !executable.is_file() {
@@ -393,7 +393,26 @@ impl RuntimeRepository {
 
 pub fn explicit_python(configured: &str) -> Option<PathBuf> {
     let path = Path::new(configured);
-    (path.is_absolute() && path.is_file()).then(|| path.to_owned())
+    if path.is_absolute() {
+        return path.is_file().then(|| path.to_owned());
+    }
+    if !is_path_command(path) {
+        return None;
+    }
+    Command::new(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()
+        .filter(|status| status.success())
+        .map(|_| path.to_owned())
+}
+
+fn is_path_command(path: &Path) -> bool {
+    let mut components = path.components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
 }
 
 fn preferred_accelerator(preference: &str, nvidia_detected: bool) -> &'static str {
@@ -429,11 +448,18 @@ fn component_for_runtime<'a>(
         })
 }
 
+#[cfg(not(target_os = "macos"))]
 fn detect_nvidia() -> (bool, Option<String>) {
     static NVIDIA: OnceLock<(bool, Option<String>)> = OnceLock::new();
     NVIDIA.get_or_init(probe_nvidia).clone()
 }
 
+#[cfg(target_os = "macos")]
+fn detect_nvidia() -> (bool, Option<String>) {
+    (false, None)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn probe_nvidia() -> (bool, Option<String>) {
     let mut command = Command::new("nvidia-smi");
     command
@@ -499,6 +525,7 @@ fn validate_manifest(manifest: &RuntimeManifest) -> Result<(), String> {
 
 fn safe_identifier(value: &str) -> bool {
     !value.is_empty()
+        && !matches!(value, "." | "..")
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
@@ -597,8 +624,40 @@ fn download_archive(
     Ok(())
 }
 
-fn extract_archive(source: &Path, target: &Path, maximum_size: u64) -> Result<(), String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeArchiveFormat {
+    Zip,
+    TarGz,
+}
+
+fn archive_format(component: &RuntimeComponent) -> Result<RuntimeArchiveFormat, String> {
+    let path = Url::parse(&component.url)
+        .map_err(|_| "推理组件下载地址无效")?
+        .path()
+        .to_ascii_lowercase();
+    if path.ends_with(".zip") {
+        Ok(RuntimeArchiveFormat::Zip)
+    } else if path.ends_with(".tar.gz") || path.ends_with(".tgz") {
+        Ok(RuntimeArchiveFormat::TarGz)
+    } else {
+        Err("推理组件压缩包格式不受支持".into())
+    }
+}
+
+fn extract_archive(
+    source: &Path,
+    target: &Path,
+    maximum_size: u64,
+    format: RuntimeArchiveFormat,
+) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|error| error.to_string())?;
+    match format {
+        RuntimeArchiveFormat::Zip => extract_zip(source, target, maximum_size),
+        RuntimeArchiveFormat::TarGz => extract_tar_gz(source, target, maximum_size),
+    }
+}
+
+fn extract_zip(source: &Path, target: &Path, maximum_size: u64) -> Result<(), String> {
     let file = File::open(source).map_err(|error| format!("无法打开推理组件：{error}"))?;
     let mut archive =
         ZipArchive::new(file).map_err(|error| format!("推理组件压缩包无效：{error}"))?;
@@ -627,10 +686,86 @@ fn extract_archive(source: &Path, target: &Path, maximum_size: u64) -> Result<()
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        let mut output = File::create(destination).map_err(|error| error.to_string())?;
+        let mut output = File::create(&destination).map_err(|error| error.to_string())?;
         std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&destination, fs::Permissions::from_mode(mode & 0o777))
+                .map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
+}
+
+fn extract_tar_gz(source: &Path, target: &Path, maximum_size: u64) -> Result<(), String> {
+    let file = File::open(source).map_err(|error| format!("无法打开推理组件：{error}"))?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    let mut total = 0u64;
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("推理组件压缩包无效：{error}"))?;
+    for entry in entries {
+        let mut entry = entry.map_err(|error| format!("推理组件压缩包无效：{error}"))?;
+        let path = entry
+            .path()
+            .map_err(|error| format!("推理组件压缩包路径无效：{error}"))?
+            .into_owned();
+        if !safe_archive_path(&path) {
+            return Err("推理组件压缩包包含不安全路径".into());
+        }
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_symlink() || entry_type.is_hard_link() {
+            let link = entry
+                .link_name()
+                .map_err(|error| format!("推理组件链接无效：{error}"))?
+                .ok_or("推理组件链接缺少目标")?;
+            if !safe_archive_link(&path, &link) {
+                return Err("推理组件压缩包包含越界链接".into());
+            }
+        }
+        total = total.saturating_add(entry.size());
+        if total > maximum_size.max(1024 * 1024 * 1024) {
+            return Err("推理组件解压后体积异常".into());
+        }
+        if !entry
+            .unpack_in(target)
+            .map_err(|error| format!("无法解压推理组件：{error}"))?
+        {
+            return Err("推理组件压缩包包含不安全路径".into());
+        }
+    }
+    Ok(())
+}
+
+fn safe_archive_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn safe_archive_link(entry: &Path, link: &Path) -> bool {
+    if link.is_absolute() {
+        return false;
+    }
+    let mut depth = entry.parent().map_or(0, |parent| {
+        parent
+            .components()
+            .filter(|component| matches!(component, Component::Normal(_)))
+            .count()
+    });
+    for component in link.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => {}
+            Component::ParentDir if depth > 0 => depth -= 1,
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn read_marker(directory: &Path) -> Option<InstallMarker> {
@@ -737,12 +872,79 @@ mod tests {
         let mut escaping = manifest();
         escaping.components[0].executable = "../rain-worker.exe".into();
         assert!(validate_manifest(&escaping).is_err());
+        for identifier in [".", ".."] {
+            let mut unsafe_id = manifest();
+            unsafe_id.components[0].id = identifier.into();
+            assert!(validate_manifest(&unsafe_id).is_err());
+            let mut unsafe_version = manifest();
+            unsafe_version.components[0].version = identifier.into();
+            assert!(validate_manifest(&unsafe_version).is_err());
+        }
+    }
+
+    #[test]
+    fn path_python_accepts_only_a_single_command_name() {
+        assert!(is_path_command(Path::new("python")));
+        assert!(!is_path_command(Path::new("./python")));
+        assert!(!is_path_command(Path::new("bin/python")));
+        assert!(!is_path_command(Path::new("../python")));
     }
 
     #[test]
     fn missing_release_manifest_is_not_a_runtime_error() {
         assert!(manifest_is_unpublished(StatusCode::NOT_FOUND));
         assert!(!manifest_is_unpublished(StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    #[test]
+    fn macos_tar_runtime_format_and_links_are_bounded() {
+        let mut component = manifest().components.remove(0);
+        component.url = "https://example.invalid/runtime.tar.gz".into();
+        assert_eq!(
+            archive_format(&component).unwrap(),
+            RuntimeArchiveFormat::TarGz
+        );
+        assert!(safe_archive_link(
+            Path::new("runtime/lib/libcurrent.dylib"),
+            Path::new("libreal.dylib")
+        ));
+        assert!(!safe_archive_link(
+            Path::new("runtime/lib/libcurrent.dylib"),
+            Path::new("../../../outside")
+        ));
+    }
+
+    #[test]
+    fn tar_gz_runtime_preserves_executable_mode() {
+        let root = std::env::temp_dir().join(format!("rain-runtime-tar-{}", uuid::Uuid::new_v4()));
+        let archive_path = root.join("runtime.tar.gz");
+        let extracted = root.join("extracted");
+        fs::create_dir_all(&root).unwrap();
+        let file = File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        let payload = b"worker";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(payload.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, "rain-worker/rain-native-worker", &payload[..])
+            .unwrap();
+        archive.into_inner().unwrap().finish().unwrap();
+
+        extract_archive(&archive_path, &extracted, 1024, RuntimeArchiveFormat::TarGz).unwrap();
+        let executable = extracted.join("rain-worker/rain-native-worker");
+        assert_eq!(fs::read(&executable).unwrap(), payload);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_ne!(
+                executable.metadata().unwrap().permissions().mode() & 0o111,
+                0
+            );
+        }
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

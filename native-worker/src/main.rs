@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-const MAX_AUDIO_BYTES: usize = 32 * 1024 * 1024;
+const MAX_AUDIO_BYTES: usize = 3_600 * 16_000 * 2;
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -40,12 +40,7 @@ struct OfflineModel {
 }
 
 impl OfflineModel {
-    fn load(model_path: &str, adapter_type: &str, device: &str) -> Result<Self, String> {
-        if adapter_type != "sensevoice" {
-            return Err(format!(
-                "原生 Worker 当前只支持 SenseVoice，收到适配器：{adapter_type}"
-            ));
-        }
+    fn load(model_path: &str, device: &str) -> Result<Self, String> {
         if !matches!(device, "" | "auto" | "cpu") {
             return Err("当前原生 Worker 是 CPU 版本；CUDA 组件尚未启用".into());
         }
@@ -143,18 +138,14 @@ impl PreviewModel {
             .unwrap_or_default())
     }
 
-    fn finish(&mut self) -> String {
+    fn finish(&mut self) {
         let Some(stream) = self.stream.take() else {
-            return String::new();
+            return;
         };
         stream.input_finished();
         while self.recognizer.is_ready(&stream) {
             self.recognizer.decode(&stream);
         }
-        self.recognizer
-            .get_result(&stream)
-            .map(|result| result.text.trim().to_owned())
-            .unwrap_or_default()
     }
 }
 
@@ -166,7 +157,7 @@ enum LoadedModel {
 impl LoadedModel {
     fn load(model_path: &str, adapter_type: &str, device: &str) -> Result<Self, String> {
         match adapter_type {
-            "sensevoice" => OfflineModel::load(model_path, adapter_type, device).map(Self::Offline),
+            "sensevoice" => OfflineModel::load(model_path, device).map(Self::Offline),
             "streaming_zipformer" => PreviewModel::load(model_path, device).map(Self::Preview),
             _ => Err(format!("原生 Worker 不支持适配器：{adapter_type}")),
         }
@@ -271,7 +262,10 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                 &mut output,
                 "worker_error",
                 &request.request_id,
-                json!({"code": "AUDIO_TOO_LARGE", "message": "录音数据超过 32 MB 限制"}),
+                json!({
+                    "code": "AUDIO_TOO_LARGE",
+                    "message": format!("录音数据超过 {MAX_AUDIO_BYTES} 字节限制")
+                }),
             )
             .map_err(|error| error.to_string())?;
             break;
@@ -318,12 +312,6 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
             },
             "transcribe" => {
                 let started = Instant::now();
-                emit(
-                    &mut output,
-                    "transcription_started",
-                    &request.request_id,
-                    json!({}),
-                )?;
                 match loaded
                     .as_ref()
                     .ok_or_else(|| "模型尚未加载".to_string())
@@ -338,7 +326,6 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                         &request.request_id,
                         json!({
                             "text": text,
-                            "language": "auto",
                             "duration_ms": audio.len() as u64 * 1000 / 2 / request.sample_rate as u64,
                             "inference_ms": started.elapsed().as_millis() as u64
                         }),
@@ -387,20 +374,17 @@ fn run(input: impl Read, output: impl Write) -> Result<(), String> {
                     json!({"code": "PREVIEW_NOT_READY", "message": "实时预览模型尚未加载"}),
                 ),
             },
-            "preview_finish" => match loaded.as_mut() {
-                Some(LoadedModel::Preview(model)) => emit(
+            "preview_finish" => {
+                if let Some(LoadedModel::Preview(model)) = loaded.as_mut() {
+                    model.finish();
+                }
+                emit(
                     &mut output,
                     "preview_completed",
                     &request.request_id,
-                    json!({"text": model.finish()}),
-                ),
-                _ => emit(
-                    &mut output,
-                    "preview_completed",
-                    &request.request_id,
-                    json!({"text": ""}),
-                ),
-            },
+                    json!({}),
+                )
+            }
             "unload_model" => {
                 loaded = None;
                 emit(
@@ -447,5 +431,10 @@ mod tests {
         assert_eq!(pcm16_to_f32(&[0, 0, 0xff, 0x7f]).len(), 2);
         assert_eq!(pcm16_to_f32(&[0, 0, 1]).len(), 1);
         assert!((1..=64).contains(&inference_threads()));
+    }
+
+    #[test]
+    fn audio_limit_matches_the_public_one_hour_setting() {
+        assert_eq!(MAX_AUDIO_BYTES, 115_200_000);
     }
 }

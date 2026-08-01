@@ -1,11 +1,18 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(target_os = "macos")]
+use std::sync::mpsc;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 pub struct Recording {
+    #[cfg(not(target_os = "macos"))]
     stream: cpal::Stream,
+    #[cfg(target_os = "macos")]
+    stop: Option<mpsc::Sender<()>>,
+    #[cfg(target_os = "macos")]
+    audio_thread: Option<std::thread::JoinHandle<()>>,
     samples: Arc<Mutex<Vec<f32>>>,
     error: Arc<Mutex<Option<String>>>,
     sample_rate: u32,
@@ -14,70 +21,65 @@ pub struct Recording {
 
 impl Recording {
     pub fn start(input_device: Option<&str>) -> Result<Self, String> {
-        let host = cpal::default_host();
-        let device = if let Some(name) = input_device.filter(|value| !value.is_empty()) {
-            host.input_devices()
-                .map_err(|error| format!("无法读取麦克风列表：{error}"))?
-                .find(|device| device.name().as_deref() == Ok(name))
-                .ok_or_else(|| format!("麦克风已断开：{name}"))?
-        } else {
-            host.default_input_device().ok_or("未找到可用麦克风")?
-        };
-        let supported = device
-            .default_input_config()
-            .map_err(|error| format!("无法读取麦克风格式：{error}"))?;
-        let sample_rate = supported.sample_rate().0;
-        let sample_format = supported.sample_format();
-        let config: cpal::StreamConfig = supported.into();
-        let channels = usize::from(config.channels);
         let samples = Arc::new(Mutex::new(Vec::new()));
         let error = Arc::new(Mutex::new(None));
 
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => {
-                let output = samples.clone();
-                let failure = error.clone();
-                device.build_input_stream(
-                    &config,
-                    move |data: &[f32], _| push_mono_f32(data, channels, &output),
-                    move |cause| set_error(&failure, cause.to_string()),
-                    None,
-                )
-            }
-            cpal::SampleFormat::I16 => {
-                let output = samples.clone();
-                let failure = error.clone();
-                device.build_input_stream(
-                    &config,
-                    move |data: &[i16], _| push_mono_i16(data, channels, &output),
-                    move |cause| set_error(&failure, cause.to_string()),
-                    None,
-                )
-            }
-            cpal::SampleFormat::U16 => {
-                let output = samples.clone();
-                let failure = error.clone();
-                device.build_input_stream(
-                    &config,
-                    move |data: &[u16], _| push_mono_u16(data, channels, &output),
-                    move |cause| set_error(&failure, cause.to_string()),
-                    None,
-                )
-            }
-            format => return Err(format!("暂不支持麦克风采样格式：{format:?}")),
+        #[cfg(target_os = "macos")]
+        {
+            let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+            let (stop_sender, stop_receiver) = mpsc::channel();
+            let device_name = input_device.map(str::to_owned);
+            let thread_samples = samples.clone();
+            let thread_error = error.clone();
+            let audio_thread = std::thread::spawn(move || {
+                match start_input_stream(
+                    device_name.as_deref(),
+                    thread_samples,
+                    thread_error.clone(),
+                ) {
+                    Ok((stream, sample_rate)) => {
+                        let _ = ready_sender.send(Ok(sample_rate));
+                        let _ = stop_receiver.recv();
+                        drop(stream);
+                    }
+                    Err(cause) => {
+                        let _ = ready_sender.send(Err(cause));
+                    }
+                }
+            });
+            let sample_rate = match ready_receiver.recv() {
+                Ok(Ok(sample_rate)) => sample_rate,
+                Ok(Err(cause)) => {
+                    let _ = audio_thread.join();
+                    return Err(cause);
+                }
+                Err(_) => {
+                    let _ = audio_thread.join();
+                    return Err("麦克风线程在初始化前退出".into());
+                }
+            };
+            Ok(Self {
+                stop: Some(stop_sender),
+                audio_thread: Some(audio_thread),
+                samples,
+                error,
+                sample_rate,
+                started_at: Instant::now(),
+            })
         }
-        .map_err(|error| format!("无法启动麦克风：{error}"))?;
-        stream
-            .play()
-            .map_err(|error| format!("无法开始录音：{error}"))?;
 
-        Ok(Self {
-            stream,
-            samples,
-            error,
-            sample_rate,
-            started_at: Instant::now(),
-        })
+        #[cfg(not(target_os = "macos"))]
+        {
+            let (stream, sample_rate) =
+                start_input_stream(input_device, samples.clone(), error.clone())?;
+            Ok(Self {
+                stream,
+                samples,
+                error,
+                sample_rate,
+                started_at: Instant::now(),
+            })
+        }
     }
 
     pub fn elapsed(&self) -> Duration {
@@ -109,16 +111,101 @@ impl Recording {
     }
 
     pub fn finish(self) -> Result<Vec<i16>, String> {
-        drop(self.stream);
-        if let Some(error) = self.error.lock().map_err(|_| "录音状态损坏")?.take() {
+        #[cfg(target_os = "macos")]
+        let mut recording = self;
+        #[cfg(not(target_os = "macos"))]
+        let recording = self;
+        #[cfg(target_os = "macos")]
+        recording.stop_audio_thread();
+        #[cfg(not(target_os = "macos"))]
+        drop(recording.stream);
+        if let Some(error) = recording.error.lock().map_err(|_| "录音状态损坏")?.take() {
             return Err(format!("麦克风录音中断：{error}"));
         }
-        let input = std::mem::take(&mut *self.samples.lock().map_err(|_| "录音缓冲损坏")?);
+        let input = std::mem::take(&mut *recording.samples.lock().map_err(|_| "录音缓冲损坏")?);
         if input.is_empty() {
             return Err("没有采集到音频".into());
         }
-        Ok(resample_to_16khz(&input, self.sample_rate))
+        Ok(resample_to_16khz(&input, recording.sample_rate))
     }
+
+    #[cfg(target_os = "macos")]
+    fn stop_audio_thread(&mut self) {
+        drop(self.stop.take());
+        if let Some(thread) = self.audio_thread.take() {
+            if thread.join().is_err() {
+                set_error(&self.error, "麦克风线程异常退出".into());
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for Recording {
+    fn drop(&mut self) {
+        self.stop_audio_thread();
+    }
+}
+
+fn start_input_stream(
+    input_device: Option<&str>,
+    samples: Arc<Mutex<Vec<f32>>>,
+    error: Arc<Mutex<Option<String>>>,
+) -> Result<(cpal::Stream, u32), String> {
+    let host = cpal::default_host();
+    let device = if let Some(name) = input_device.filter(|value| !value.is_empty()) {
+        host.input_devices()
+            .map_err(|error| format!("无法读取麦克风列表：{error}"))?
+            .find(|device| device.name().as_deref() == Ok(name))
+            .ok_or_else(|| format!("麦克风已断开：{name}"))?
+    } else {
+        host.default_input_device().ok_or("未找到可用麦克风")?
+    };
+    let supported = device
+        .default_input_config()
+        .map_err(|error| format!("无法读取麦克风格式：{error}"))?;
+    let sample_rate = supported.sample_rate().0;
+    let sample_format = supported.sample_format();
+    let config: cpal::StreamConfig = supported.into();
+    let channels = usize::from(config.channels);
+    let stream = match sample_format {
+        cpal::SampleFormat::F32 => {
+            let output = samples.clone();
+            let failure = error.clone();
+            device.build_input_stream(
+                &config,
+                move |data: &[f32], _| push_mono_f32(data, channels, &output),
+                move |cause| set_error(&failure, cause.to_string()),
+                None,
+            )
+        }
+        cpal::SampleFormat::I16 => {
+            let output = samples.clone();
+            let failure = error.clone();
+            device.build_input_stream(
+                &config,
+                move |data: &[i16], _| push_mono_i16(data, channels, &output),
+                move |cause| set_error(&failure, cause.to_string()),
+                None,
+            )
+        }
+        cpal::SampleFormat::U16 => {
+            let output = samples.clone();
+            let failure = error.clone();
+            device.build_input_stream(
+                &config,
+                move |data: &[u16], _| push_mono_u16(data, channels, &output),
+                move |cause| set_error(&failure, cause.to_string()),
+                None,
+            )
+        }
+        format => return Err(format!("暂不支持麦克风采样格式：{format:?}")),
+    }
+    .map_err(|error| format!("无法启动麦克风：{error}"))?;
+    stream
+        .play()
+        .map_err(|error| format!("无法开始录音：{error}"))?;
+    Ok((stream, sample_rate))
 }
 
 pub fn input_devices() -> Result<Vec<String>, String> {

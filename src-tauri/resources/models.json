@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "manifest_version": "2026-07-16-stream-preview-1",
+  "manifest_version": "2026-08-01-mac-1",
   "models": [
     {
       "id": "sensevoice-small",
@@ -22,14 +22,14 @@
       "download_size": 937938127,
       "installed_size": 937938127,
       "license": "Apache-2.0",
-      "official_source": "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest",
+      "official_source": "https://github.com/qixiaoyu27/Rain-VibeType/releases/tag/v1.0.0",
       "mirror_source": "https://huggingface.co/FunAudioLLM/SenseVoiceSmall",
       "recommended_hardware": "x64 CPU 4 核 / 8 GB 内存",
       "speed_grade": "快",
       "adapter_compatibility": "Rain 原生 sherpa-onnx Worker 1.0+",
       "files": [
-        {"path":"model.onnx","size":937622233,"sha256":"3e4c36cf6b48962adc0a878db2edbb035e43b985b3e56b00a6bbd0a49c6cc2a2","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/sensevoice-small-model.onnx"},
-        {"path":"tokens.txt","size":315894,"sha256":"f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/sensevoice-small-tokens.txt"}
+        {"path":"model.onnx","size":937622233,"sha256":"3e4c36cf6b48962adc0a878db2edbb035e43b985b3e56b00a6bbd0a49c6cc2a2","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/sensevoice-small-model.onnx"},
+        {"path":"tokens.txt","size":315894,"sha256":"f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/sensevoice-small-tokens.txt"}
       ]
     },
     {
@@ -130,10 +130,10 @@
       "speed_grade": "实时",
       "adapter_compatibility": "Rain 原生 sherpa-onnx Worker 1.1+",
       "files": [
-        {"path":"encoder.int8.onnx","size":42980793,"sha256":"db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/rain-stream-preview-encoder-int8.onnx"},
-        {"path":"decoder.onnx","size":13877276,"sha256":"89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/rain-stream-preview-decoder.onnx"},
-        {"path":"joiner.int8.onnx","size":3228485,"sha256":"bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/rain-stream-preview-joiner-int8.onnx"},
-        {"path":"tokens.txt","size":56317,"sha256":"a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/rain-stream-preview-tokens.txt"}
+        {"path":"encoder.int8.onnx","size":42980793,"sha256":"db6f51551762e40e549166fe041ea3e45464370b595e9ad23f06478ec3794fbb","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/rain-stream-encoder-int8.onnx"},
+        {"path":"decoder.onnx","size":13877276,"sha256":"89be509a83175261695bdef5fd1c7b9ab1129a663d1284e7ba9f8507b21e0906","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/rain-stream-decoder.onnx"},
+        {"path":"joiner.int8.onnx","size":3228485,"sha256":"bdda356d6f9b8c2d7cee9ee0e26075fa537490f7fd06520be408d287073667b9","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/rain-stream-joiner-int8.onnx"},
+        {"path":"tokens.txt","size":56317,"sha256":"a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3","url":"https://github.com/qixiaoyu27/Rain-VibeType/releases/download/v1.0.0/rain-stream-tokens.txt"}
       ]
     },
     {

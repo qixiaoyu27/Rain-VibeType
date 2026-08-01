@@ -1,6 +1,6 @@
 param(
     [string]$Python = "py -3.11",
-    [string]$RuntimeVersion = "1.1.0",
+    [string]$RuntimeVersion = "1.0.0",
     [string]$TorchVersion = "2.11.0",
     [string]$ArtifactBaseUrl = $env:RAIN_RUNTIME_ARTIFACT_BASE_URL,
     [string]$OutputDirectory = ""

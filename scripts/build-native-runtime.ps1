@@ -1,5 +1,5 @@
 param(
-    [string]$RuntimeVersion = "1.1.0",
+    [string]$RuntimeVersion = "1.0.0",
     [string]$ArtifactBaseUrl = "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download",
     [string]$OutputDirectory = ""
 )
@@ -52,7 +52,6 @@ $Component = [ordered]@{
     display_name = "Rain native CPU inference component"
     version = $RuntimeVersion
     accelerator = "cpu"
-    adapter_types = @("sensevoice", "streaming_zipformer")
     url = "$($ArtifactBaseUrl.TrimEnd('/'))/$ArchiveName"
     archive_size = [long]$ArchiveInfo.Length
     installed_size = [long](Get-Item -LiteralPath $PackagedWorker).Length

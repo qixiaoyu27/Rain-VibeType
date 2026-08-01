@@ -1,17 +1,5 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "雨音输入法",
-  "version": "1.0.0",
-  "identifier": "io.github.rain.voice-input",
-  "build": {
-    "frontendDist": "../src"
-  },
   "app": {
-    "macOSPrivateApi": true,
-    "withGlobalTauri": true,
-    "security": {
-      "csp": "default-src 'self'; style-src 'self'; script-src 'self'"
-    },
     "windows": [
       {
         "label": "main",
@@ -23,7 +11,7 @@
         "minHeight": 620,
         "center": true,
         "decorations": false,
-        "transparent": false
+        "transparent": true
       },
       {
         "label": "overlay",
@@ -57,27 +45,15 @@
       }
     ]
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "",
-      "endpoints": [],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  },
   "bundle": {
-    "active": true,
-    "icon": [
-      "icons/32x32.png",
-      "icons/32x32@2x.png",
-      "icons/128x128.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
-    "createUpdaterArtifacts": true,
-    "targets": ["nsis"],
-    "shortDescription": "Rain Vibetype 本地优先的 Windows 11 语音输入法",
-    "longDescription": "雨音输入法通过全局快捷键录音，使用本地语音模型识别并安全输入文字。"
+    "createUpdaterArtifacts": false,
+    "targets": ["app", "dmg"],
+    "shortDescription": "Rain Vibetype 本地优先的 macOS 语音输入法",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
+    }
   }
 }

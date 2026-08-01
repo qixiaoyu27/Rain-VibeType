@@ -1,17 +1,22 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod audio;
 mod config;
 mod diagnostics;
 mod models;
-mod platform_windows;
+#[cfg(target_os = "macos")]
+#[path = "platform_macos.rs"]
+mod platform;
+#[cfg(windows)]
+#[path = "platform_windows.rs"]
+mod platform;
 mod runtimes;
 mod text_polish;
 mod worker;
 
 use config::Config;
 use models::{DownloadProgress, ImportResult, ModelCard, ModelDefinition, ModelRepository};
-use platform_windows::InputTarget;
+use platform::InputTarget;
 use runtimes::{RuntimeRepository, RuntimeStatus};
 use serde::Serialize;
 use std::{
@@ -39,16 +44,26 @@ const OFFICIAL_UPDATE_ENDPOINT: &str =
     "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/latest.json";
 const OFFICIAL_MODEL_MANIFEST_ENDPOINT: &str =
     "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/models.json";
+#[cfg(windows)]
 const OFFICIAL_RUNTIME_MANIFEST_ENDPOINT: &str =
     "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/runtime-manifest.json";
+#[cfg(target_os = "macos")]
+const OFFICIAL_RUNTIME_MANIFEST_ENDPOINT: &str = "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download/runtime-manifest-aarch64-apple-darwin.json";
 const TEXT_MODEL_ID: &str = "qwen3-0-6b-text";
 const PREVIEW_MODEL_ID: &str = "streaming-zipformer-preview";
-const TEXT_RUNTIME_COMPONENT_ID: &str = "llama-text-cpu-win-x64";
+#[cfg(windows)]
 const TEXT_RUNTIME_MANIFEST: &str = include_str!("../resources/text-runtime-manifest.json");
+#[cfg(target_os = "macos")]
+const TEXT_RUNTIME_MANIFEST: &str = include_str!("../resources/text-runtime-manifest-macos.json");
+
+#[cfg(windows)]
+const MISSING_RUNTIME_EXECUTABLE: &str = "runtime-not-installed.exe";
+#[cfg(target_os = "macos")]
+const MISSING_RUNTIME_EXECUTABLE: &str = "runtime-not-installed";
 
 fn config_uses_english(config: &Config) -> bool {
     config.ui_language == "en"
-        || (config.ui_language == "system" && platform_windows::system_prefers_english())
+        || (config.ui_language == "system" && platform::system_prefers_english())
 }
 
 fn app_uses_english(app: &AppHandle) -> bool {
@@ -87,6 +102,10 @@ fn can_cancel(phase: Phase) -> bool {
     )
 }
 
+fn cancel_interrupts_worker(phase: Phase) -> bool {
+    matches!(phase, Phase::WaitingForModel | Phase::Transcribing)
+}
+
 fn accepts_transcription(runtime: &Runtime, request_id: &str) -> bool {
     runtime.phase == Phase::Transcribing && runtime.request_id.as_deref() == Some(request_id)
 }
@@ -99,10 +118,9 @@ struct Runtime {
     phase: Phase,
     request_id: Option<String>,
     recording: Option<audio::Recording>,
-    system_audio_ducker: Option<platform_windows::SystemAudioDucker>,
+    system_audio_ducker: Option<platform::SystemAudioDucker>,
     target: Option<InputTarget>,
     pending_text: Option<String>,
-    model_load_error: Option<String>,
     preview_text: String,
 }
 
@@ -115,7 +133,6 @@ impl Default for Runtime {
             system_audio_ducker: None,
             target: None,
             pending_text: None,
-            model_load_error: None,
             preview_text: String::new(),
         }
     }
@@ -134,6 +151,7 @@ struct AppState {
     text_runtime_root: PathBuf,
     runtime: Mutex<Runtime>,
     worker: Arc<Mutex<WorkerClient>>,
+    worker_canceller: worker::WorkerCanceller,
     preview_worker: Arc<Mutex<WorkerClient>>,
     text_polisher: Arc<Mutex<text_polish::TextPolisher>>,
     diagnostics: diagnostics::Diagnostics,
@@ -167,7 +185,6 @@ struct UpdateInfo {
 #[derive(Clone, Serialize)]
 struct ModelUpdateInfo {
     changed: bool,
-    manifest_version: String,
     models: Vec<ModelCard>,
 }
 
@@ -205,6 +222,50 @@ fn get_system_status(state: State<'_, AppState>) -> Result<SystemStatus, String>
         .map_err(|_| "系统状态损坏".into())
 }
 
+fn configured_model_root(default_root: &std::path::Path, config: &Config) -> PathBuf {
+    config
+        .model_storage_dir
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_root.to_owned())
+}
+
+fn same_model_root(left: &std::path::Path, right: &std::path::Path) -> bool {
+    left == right
+        || matches!(
+            (std::fs::canonicalize(left), std::fs::canonicalize(right)),
+            (Ok(left), Ok(right)) if left == right
+        )
+}
+
+fn selected_managed_model(config: &Config, root: &std::path::Path) -> bool {
+    let path = std::path::Path::new(&config.model_path);
+    if config.selected_model_id.is_empty() || !path.join(".rain-model.json").is_file() {
+        return false;
+    }
+    matches!(
+        (std::fs::canonicalize(root), std::fs::canonicalize(path)),
+        (Ok(root), Ok(path)) if path.starts_with(&root)
+    )
+}
+
+fn model_storage_in_use(selected: bool, installed: bool) -> bool {
+    selected || installed
+}
+
+fn shortcut_registration_required(changed: bool, registered: bool) -> bool {
+    changed || !registered
+}
+
+fn ensure_model_deletion_allowed(active: &Option<ActiveDownload>) -> Result<(), String> {
+    if active.is_some() {
+        Err("MODEL_DOWNLOAD_ACTIVE：模型下载期间不能删除模型".into())
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 fn save_config(
     config: Config,
@@ -216,17 +277,39 @@ fn save_config(
     }
     config.validate()?;
     let previous = state.config.lock().map_err(|_| "配置状态损坏")?.clone();
-    let shortcut_needs_registration = config.hotkey != previous.hotkey
-        || !state
-            .system_status
-            .lock()
-            .map_err(|_| "系统状态损坏")?
-            .shortcut_ready;
+    let previous_root = configured_model_root(&state.default_model_root, &previous);
+    let next_root = configured_model_root(&state.default_model_root, &config);
+    let model_storage_changed = !same_model_root(&previous_root, &next_root);
+    let download_guard = if model_storage_changed {
+        let guard = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+        if guard.is_some() {
+            return Err("MODEL_STORAGE_IN_USE：模型下载期间不能切换存储目录".into());
+        }
+        let repository = ModelRepository::new(previous_root.clone())?;
+        if model_storage_in_use(
+            selected_managed_model(&previous, &previous_root),
+            repository.has_managed_models()?,
+        ) {
+            return Err(
+                "MODEL_STORAGE_IN_USE：请先删除已选择或已安装的模型，再切换存储目录".into(),
+            );
+        }
+        Some(guard)
+    } else {
+        None
+    };
+    let previous_shortcut_ready = state
+        .system_status
+        .lock()
+        .map_err(|_| "系统状态损坏")?
+        .shortcut_ready;
+    let shortcut_needs_registration =
+        shortcut_registration_required(config.hotkey != previous.hotkey, previous_shortcut_ready);
     if shortcut_needs_registration {
         if let Err(error) = app.global_shortcut().register(config.hotkey.as_str()) {
             let message = format!("快捷键注册失败，已保留原快捷键：{error}");
             if let Ok(mut status) = state.system_status.lock() {
-                status.shortcut_ready = false;
+                status.shortcut_ready = previous_shortcut_ready;
                 status.shortcut_error = Some(message.clone());
             }
             return Err(message);
@@ -280,12 +363,14 @@ fn save_config(
     }
     let model_changed = config.model_path != previous.model_path
         || config.device_preference != previous.device_preference
-        || config.selected_model_id != previous.selected_model_id;
+        || config.selected_model_id != previous.selected_model_id
+        || model_storage_changed;
     let tray_changed = config.ui_language != previous.ui_language
         || config.selected_model_id != previous.selected_model_id;
     let stop_text_polisher = (!config.text_polish_enabled && previous.text_polish_enabled)
         || config.text_polish_idle_timeout_seconds != previous.text_polish_idle_timeout_seconds;
     *state.config.lock().map_err(|_| "配置状态损坏")? = config.clone();
+    drop(download_guard);
     configure_worker_runtime(&state, &config)?;
     if model_changed {
         reload_selected_model(&app);
@@ -355,6 +440,24 @@ fn text_runtime_repository(state: &AppState) -> Result<RuntimeRepository, String
     RuntimeRepository::new_with_embedded(state.text_runtime_root.clone(), TEXT_RUNTIME_MANIFEST)
 }
 
+#[cfg(debug_assertions)]
+fn development_native_worker() -> Option<PathBuf> {
+    std::env::var_os("RAIN_DEV_NATIVE_WORKER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            Some(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../native-worker/target/debug/rain-native-worker"),
+            )
+        })
+        .filter(|path| path.is_absolute() && path.is_file())
+}
+
+#[cfg(not(debug_assertions))]
+fn development_native_worker() -> Option<PathBuf> {
+    None
+}
+
 #[derive(Clone, Debug)]
 struct ResolvedRuntimeDependency {
     repository: String,
@@ -402,18 +505,23 @@ fn mapped_runtime_repository(
 fn cleanup_unreferenced_runtimes(
     state: &AppState,
     repository: &ModelRepository,
-    deleted_model: &ModelDefinition,
+    deleted_models: &[ModelDefinition],
 ) -> Result<(), String> {
-    let component_ids = deleted_model
-        .runtime
-        .components
-        .values()
-        .cloned()
+    let dependencies = deleted_models
+        .iter()
+        .flat_map(|model| {
+            model
+                .runtime
+                .components
+                .values()
+                .cloned()
+                .map(|component| (model.runtime.repository.clone(), component))
+        })
         .collect::<HashSet<_>>();
-    for component_id in component_ids {
-        if repository.models_using_runtime(&component_id).is_empty() {
+    for (runtime_repository, component_id) in dependencies {
+        if repository.models_using_runtime(&component_id)?.is_empty() {
             mapped_runtime_repository(
-                &deleted_model.runtime.repository,
+                &runtime_repository,
                 state.runtime_root.clone(),
                 state.text_runtime_root.clone(),
             )?
@@ -437,12 +545,17 @@ fn text_polish_status(state: &AppState) -> Result<TextPolishStatus, String> {
         .lock()
         .map_err(|_| "配置状态损坏")?
         .text_polish_enabled;
-    let model = model_repository(state)?
+    let repository = model_repository(state)?;
+    let model = repository
         .list()
         .into_iter()
         .find(|model| model.definition.id == TEXT_MODEL_ID)
         .ok_or("TEXT_POLISH_MODEL_NOT_CONFIGURED：缺少文本整理模型定义")?;
-    let dependency = resolve_runtime_dependency(&model.definition, "cpu")?;
+    let runtime_definition = match model.installed_path.as_deref() {
+        Some(path) => repository.installed_definition(TEXT_MODEL_ID, std::path::Path::new(path))?,
+        None => repository.platform_definition(TEXT_MODEL_ID)?,
+    };
+    let dependency = resolve_runtime_dependency(&runtime_definition, "cpu")?;
     let runtime = text_runtime_repository(state)?.status_for_component(
         "cpu",
         "",
@@ -468,23 +581,37 @@ fn configure_worker_runtime(state: &AppState, config: &Config) -> Result<Runtime
     } else {
         &config.selected_model_id
     };
-    let model = model_repository(state)?.definition(model_id)?.clone();
+    let models = model_repository(state)?;
+    let model_path = std::path::Path::new(&config.model_path);
+    let model = if model_path.join(".rain-model.json").is_file() {
+        models.installed_definition(model_id, model_path)?
+    } else {
+        models.platform_definition(model_id)?
+    };
     let dependency = resolve_runtime_dependency(&model, &config.device_preference)?;
     if dependency.repository != "speech" {
         return Err("当前模型不是语音识别模型".into());
     }
     let allow_python_fallback = !prefers_native_sensevoice(config, &model.adapter_type);
-    let status = repository.status_for_component(
+    let mut status = repository.status_for_component(
         &config.device_preference,
         &config.python_path,
         Some(&dependency.component_id),
         allow_python_fallback,
     );
+    if dependency.component_id == runtimes::NATIVE_SENSEVOICE_COMPONENT {
+        if let Some(executable) = development_native_worker() {
+            status.ready = true;
+            status.source = "development".into();
+            status.active_component_id = Some(dependency.component_id.clone());
+            status.active_executable = Some(executable.to_string_lossy().into_owned());
+        }
+    }
     let executable = status
         .active_executable
         .as_deref()
         .map(PathBuf::from)
-        .unwrap_or_else(|| state.runtime_root.join("runtime-not-installed.exe"));
+        .unwrap_or_else(|| state.runtime_root.join(MISSING_RUNTIME_EXECUTABLE));
     state
         .worker
         .lock()
@@ -500,20 +627,6 @@ fn get_runtime_status(state: State<'_, AppState>) -> Result<RuntimeStatus, Strin
 }
 
 #[tauri::command]
-async fn refresh_runtime_status(state: State<'_, AppState>) -> Result<RuntimeStatus, String> {
-    let endpoint = runtime_manifest_endpoint();
-    let root = state.runtime_root.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut repository = RuntimeRepository::new(root)?;
-        repository.refresh_manifest(endpoint)?;
-        Ok::<(), String>(())
-    })
-    .await
-    .map_err(|error| error.to_string())??;
-    get_runtime_status(state)
-}
-
-#[tauri::command]
 fn get_text_polish_status(state: State<'_, AppState>) -> Result<TextPolishStatus, String> {
     text_polish_status(&state)
 }
@@ -526,42 +639,21 @@ fn delete_text_model(
     if state.runtime.lock().map_err(|_| "运行状态损坏")?.phase != Phase::Idle {
         return Err("录音或识别期间不能删除文本整理模型".into());
     }
+    let active_download = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+    ensure_model_deletion_allowed(&active_download)?;
     state
         .text_polisher
         .lock()
         .map_err(|_| "文本整理状态损坏")?
         .stop();
     let repository = model_repository(&state)?;
-    let deleted_model = repository.definition(TEXT_MODEL_ID)?.clone();
+    let mut deleted_models = repository.installed_definitions(TEXT_MODEL_ID)?;
+    if deleted_models.is_empty() {
+        deleted_models.push(repository.platform_definition(TEXT_MODEL_ID)?);
+    }
     repository.delete(TEXT_MODEL_ID)?;
-    cleanup_unreferenced_runtimes(&state, &repository, &deleted_model)?;
-    let _ = app.emit("text-polish-changed", ());
+    cleanup_unreferenced_runtimes(&state, &repository, &deleted_models)?;
     let _ = app.emit("runtime-changed", ());
-    text_polish_status(&state)
-}
-
-#[tauri::command]
-fn delete_text_runtime(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<TextPolishStatus, String> {
-    if state.runtime.lock().map_err(|_| "运行状态损坏")?.phase != Phase::Idle {
-        return Err("录音或识别期间不能删除文本整理推理框架".into());
-    }
-    let models = model_repository(&state)?.models_using_runtime(TEXT_RUNTIME_COMPONENT_ID);
-    if !models.is_empty() {
-        return Err(format!(
-            "RUNTIME_IN_USE：推理框架正被已安装模型使用：{}",
-            models.join("、")
-        ));
-    }
-    state
-        .text_polisher
-        .lock()
-        .map_err(|_| "文本整理状态损坏")?
-        .stop();
-    text_runtime_repository(&state)?.remove(TEXT_RUNTIME_COMPONENT_ID)?;
-    let _ = app.emit("text-polish-changed", ());
     text_polish_status(&state)
 }
 
@@ -584,7 +676,6 @@ async fn check_model_updates(state: State<'_, AppState>) -> Result<ModelUpdateIn
     let repository = ModelRepository::new(root)?;
     Ok(ModelUpdateInfo {
         changed,
-        manifest_version: repository.manifest_version().to_owned(),
         models: managed_speech_model_cards(&repository),
     })
 }
@@ -598,12 +689,15 @@ fn download_model_with_runtime(
     device_preference: &str,
     app: &AppHandle,
 ) -> Result<PathBuf, String> {
-    let model = repository.definition(model_id)?.clone();
+    let model = repository.platform_definition(model_id)?;
     let dependency = resolve_runtime_dependency(&model, device_preference)?;
     let mut runtime_repository =
         mapped_runtime_repository(&dependency.repository, speech_root, text_root)?;
     let mut runtime_total = 0;
-    if !runtime_repository.is_installed(&dependency.component_id) {
+    let development_runtime_ready = dependency.component_id
+        == runtimes::NATIVE_SENSEVOICE_COMPONENT
+        && development_native_worker().is_some();
+    if !runtime_repository.is_installed(&dependency.component_id) && !development_runtime_ready {
         if dependency.repository == "speech"
             && runtime_repository
                 .component(&dependency.component_id)
@@ -657,8 +751,36 @@ async fn download_model(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<ModelCard>, String> {
-    let repository = model_repository(&state)?;
-    let purpose = repository.definition(&model_id)?.purpose.clone();
+    let paused = Arc::new(AtomicBool::new(false));
+    {
+        let mut active = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+        if active.is_some() {
+            return Err("已有模型正在下载".into());
+        }
+        *active = Some(ActiveDownload {
+            model_id: model_id.clone(),
+            paused: paused.clone(),
+        });
+    }
+    let result = download_model_claimed(&model_id, &app, &state, paused).await;
+    let mut active = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+    if active
+        .as_ref()
+        .is_some_and(|download| download.model_id == model_id)
+    {
+        active.take();
+    }
+    result
+}
+
+async fn download_model_claimed(
+    model_id: &str,
+    app: &AppHandle,
+    state: &AppState,
+    paused: Arc<AtomicBool>,
+) -> Result<Vec<ModelCard>, String> {
+    let repository = model_repository(state)?;
+    let purpose = repository.definition(model_id)?.purpose.clone();
     let is_asr_model = purpose == "asr";
     let is_text_model = purpose == "text_polish";
     if is_text_model {
@@ -677,19 +799,8 @@ async fn download_model(
         .map_err(|_| "配置状态损坏")?
         .device_preference
         .clone();
-    let paused = Arc::new(AtomicBool::new(false));
-    {
-        let mut active = state.active_download.lock().map_err(|_| "下载状态损坏")?;
-        if active.is_some() {
-            return Err("已有模型正在下载".into());
-        }
-        *active = Some(ActiveDownload {
-            model_id: model_id.clone(),
-            paused: paused.clone(),
-        });
-    }
     let app_for_progress = app.clone();
-    let download_id = model_id.clone();
+    let download_id = model_id.to_owned();
     let joined = tauri::async_runtime::spawn_blocking(move || {
         download_model_with_runtime(
             repository,
@@ -702,11 +813,6 @@ async fn download_model(
         )
     })
     .await;
-    state
-        .active_download
-        .lock()
-        .map_err(|_| "下载状态损坏")?
-        .take();
     let result = joined.map_err(|error| error.to_string())?;
     let path = result?;
 
@@ -715,21 +821,18 @@ async fn download_model(
     {
         let mut config = state.config.lock().map_err(|_| "配置状态损坏")?;
         if config.selected_model_id.is_empty() || config.selected_model_id == model_id {
-            config.selected_model_id = model_id;
+            config.selected_model_id = model_id.to_owned();
             config.model_path = path.to_string_lossy().into_owned();
             config::save(&state.config_path, &config)?;
             selected_after_download = true;
         }
     }
     if selected_after_download {
-        reload_selected_model(&app);
+        reload_selected_model(app);
     }
     let _ = app.emit("models-changed", ());
     let _ = app.emit("runtime-changed", ());
-    if is_text_model {
-        let _ = app.emit("text-polish-changed", ());
-    }
-    let _ = setup_tray(&app);
+    let _ = setup_tray(app);
     Ok(managed_speech_model_cards(&ModelRepository::new(root)?))
 }
 
@@ -832,10 +935,15 @@ fn delete_model(
     if state.runtime.lock().map_err(|_| "运行状态损坏")?.phase != Phase::Idle {
         return Err("录音、加载或识别期间不能删除模型".into());
     }
+    let active_download = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+    ensure_model_deletion_allowed(&active_download)?;
     let repository = model_repository(&state)?;
-    let deleted_model = repository.definition(&model_id)?.clone();
-    let is_text_model = deleted_model.purpose == "text_polish";
-    match deleted_model.purpose.as_str() {
+    let current_model = repository.platform_definition(&model_id)?;
+    let mut deleted_models = repository.installed_definitions(&model_id)?;
+    if deleted_models.is_empty() {
+        deleted_models.push(current_model.clone());
+    }
+    match current_model.purpose.as_str() {
         "text_polish" => state
             .text_polisher
             .lock()
@@ -863,7 +971,7 @@ fn delete_model(
         repository.delete_managed_path(path)?;
     }
     repository.delete(&model_id)?;
-    let cleanup_result = cleanup_unreferenced_runtimes(&state, &repository, &deleted_model);
+    let cleanup_result = cleanup_unreferenced_runtimes(&state, &repository, &deleted_models);
     let mut config = state.config.lock().map_err(|_| "配置状态损坏")?;
     if config.selected_model_id == model_id {
         config.selected_model_id.clear();
@@ -873,9 +981,6 @@ fn delete_model(
     drop(config);
     let _ = app.emit("models-changed", ());
     let _ = app.emit("runtime-changed", ());
-    if is_text_model {
-        let _ = app.emit("text-polish-changed", ());
-    }
     let _ = setup_tray(&app);
     cleanup_result?;
     Ok(managed_speech_model_cards(&repository))
@@ -889,8 +994,12 @@ fn delete_old_model_versions(
     if state.runtime.lock().map_err(|_| "运行状态损坏")?.phase != Phase::Idle {
         return Err("录音、加载或识别期间不能删除旧模型".into());
     }
+    let active_download = state.active_download.lock().map_err(|_| "下载状态损坏")?;
+    ensure_model_deletion_allowed(&active_download)?;
     let repository = model_repository(&state)?;
+    let deleted_models = repository.installed_definitions(&model_id)?;
     repository.delete_previous_versions(&model_id)?;
+    cleanup_unreferenced_runtimes(&state, &repository, &deleted_models)?;
     Ok(managed_speech_model_cards(&repository))
 }
 
@@ -919,7 +1028,7 @@ fn copy_pending_text(app: AppHandle) -> Result<(), String> {
         .pending_text
         .clone()
         .ok_or("没有待恢复的文字")?;
-    platform_windows::copy_text(&text)?;
+    platform::copy_text(&text)?;
     let mut runtime = state.runtime.lock().map_err(|_| "运行状态损坏")?;
     if runtime.pending_text.as_deref() == Some(&text) {
         runtime.pending_text = None;
@@ -944,17 +1053,32 @@ fn export_diagnostics(path: String, state: State<'_, AppState>) -> Result<(), St
 #[tauri::command]
 fn open_log_directory(state: State<'_, AppState>) -> Result<(), String> {
     std::fs::create_dir_all(state.diagnostics.log_dir()).map_err(|error| error.to_string())?;
-    std::process::Command::new("explorer.exe")
-        .arg(state.diagnostics.log_dir())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("无法打开日志目录：{error}"))
+    platform::open_path(state.diagnostics.log_dir())
+}
+
+fn runtime_backend_label(status: &RuntimeStatus) -> String {
+    match status.source.as_str() {
+        "managed" | "development" => status
+            .active_component_id
+            .as_deref()
+            .map(|component| format!("{}:{component}", status.source))
+            .unwrap_or_else(|| status.source.clone()),
+        "python" => "local-python-worker".into(),
+        source => source.to_owned(),
+    }
+}
+
+fn current_crash_backend(state: &AppState, config: &Config) -> String {
+    configure_worker_runtime(state, config)
+        .map(|status| runtime_backend_label(&status))
+        .unwrap_or_else(|_| "unavailable".into())
 }
 
 #[tauri::command]
 fn pending_crash_report(state: State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
     let config = state.config.lock().map_err(|_| "配置状态损坏")?.clone();
-    Ok(state.diagnostics.pending_crash_report(&config))
+    let backend = current_crash_backend(&state, &config);
+    Ok(state.diagnostics.pending_crash_report(&config, &backend))
 }
 
 #[tauri::command]
@@ -965,9 +1089,10 @@ async fn submit_crash_report(state: State<'_, AppState>) -> Result<(), String> {
         .ok_or("CRASH_REPORT_NOT_CONFIGURED：发布构建未配置匿名崩溃报告地址")?
         .to_owned();
     let config = state.config.lock().map_err(|_| "配置状态损坏")?.clone();
+    let backend = current_crash_backend(&state, &config);
     let report = state
         .diagnostics
-        .pending_crash_report(&config)
+        .pending_crash_report(&config, &backend)
         .ok_or("没有待提交的崩溃报告")?;
     tauri::async_runtime::spawn_blocking(move || {
         let response = reqwest::blocking::Client::new()
@@ -1069,6 +1194,20 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
 }
 
 fn start_recording(app: &AppHandle) -> Result<(), String> {
+    if let Err(error) = platform::ensure_accessibility_permission() {
+        show_main(app);
+        ephemeral(
+            app,
+            "failed",
+            text(
+                app_uses_english(app),
+                "需要辅助功能权限",
+                "Accessibility permission is required",
+            ),
+            &error,
+        );
+        return Err(error);
+    }
     // Capture the user's foreground application before any runtime checks can
     // launch helper processes or touch the window manager.
     let target = InputTarget::capture();
@@ -1176,7 +1315,7 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
                 .diagnostics
                 .record(code, &config.selected_model_id, None, None);
             if config.error_sound {
-                platform_windows::play_sound("error");
+                platform::play_sound("error");
             }
             ephemeral(
                 app,
@@ -1192,7 +1331,7 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
         }
     };
     let system_audio_ducker = if config.duck_system_audio {
-        match platform_windows::SystemAudioDucker::activate() {
+        match platform::SystemAudioDucker::activate() {
             Ok(ducker) => Some(ducker),
             Err(error) => {
                 state.diagnostics.record(
@@ -1224,13 +1363,12 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
         runtime.target = target;
         runtime.recording = Some(recording);
         runtime.system_audio_ducker = system_audio_ducker;
-        runtime.model_load_error = None;
         runtime.preview_text.clear();
     }
 
     let _ = state.escape_shortcut.send(true);
     if config.start_sound {
-        platform_windows::play_sound("start");
+        platform::play_sound("start");
     }
     show_overlay(
         app,
@@ -1247,10 +1385,9 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
     );
     spawn_stream_preview(app.clone(), request_id.clone());
     let worker = state.worker.clone();
-    let app_handle = app.clone();
     let preload_request = uuid::Uuid::new_v4().to_string();
     thread::spawn(move || {
-        let result = worker
+        let _ = worker
             .lock()
             .map_err(|_| "Worker 状态损坏".to_string())
             .and_then(|mut worker| {
@@ -1262,14 +1399,6 @@ fn start_recording(app: &AppHandle) -> Result<(), String> {
                     worker_device(&config, &adapter_type),
                 )
             });
-        if let Err(error) = result {
-            let state = app_handle.state::<AppState>();
-            if let Ok(mut runtime) = state.runtime.lock() {
-                if runtime.request_id.as_deref() == Some(&request_id) {
-                    runtime.model_load_error = Some(error);
-                }
-            };
-        }
     });
     Ok(())
 }
@@ -1307,7 +1436,7 @@ fn stop_recording(app: &AppHandle) -> Result<(), String> {
         }
     };
     if config.stop_sound {
-        platform_windows::play_sound("stop");
+        platform::play_sound("stop");
     }
     show_overlay(
         app,
@@ -1430,9 +1559,9 @@ fn stop_recording(app: &AppHandle) -> Result<(), String> {
 fn polish_text(app: &AppHandle, config: &Config, raw: &str) -> Result<String, String> {
     let state = app.state::<AppState>();
     let repository = model_repository(&state)?;
-    let definition = repository.definition(TEXT_MODEL_ID)?.clone();
     let model_root = repository.installed_path(TEXT_MODEL_ID)?;
     repository.validate_loadable(TEXT_MODEL_ID, &model_root)?;
+    let definition = repository.installed_definition(TEXT_MODEL_ID, &model_root)?;
     let model_file = definition
         .files
         .first()
@@ -1526,9 +1655,9 @@ fn finish_transcription(
     let injected = match target {
         Some(target) if target.is_still_active() => {
             Some(if config.injection_method == "clipboard" {
-                platform_windows::paste_text(&recognized_text, config.restore_clipboard)
+                platform::paste_text(target, &recognized_text, config.restore_clipboard)
             } else {
-                platform_windows::type_text(&recognized_text)
+                platform::type_text(target, &recognized_text)
             })
         }
         _ => {
@@ -1557,7 +1686,7 @@ fn finish_transcription(
                 state.diagnostics.record(code, &model_id, None, None);
                 code
             });
-            match platform_windows::copy_text(&recognized_text) {
+            match platform::copy_text(&recognized_text) {
                 Ok(()) => {
                     let title = if failure_code == Some("CLIPBOARD_RESTORE_FAILED") {
                         text(
@@ -1613,19 +1742,22 @@ fn without_terminal_period(text: &str, enabled: bool) -> String {
 
 fn cancel(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let request_id = {
+    let (request_id, cancelled_phase) = {
         let mut runtime = state.runtime.lock().map_err(|_| "运行状态损坏")?;
         if !can_cancel(runtime.phase) {
             return Ok(());
         }
+        let cancelled_phase = runtime.phase;
         let request_id = runtime.request_id.take().unwrap_or_default();
         runtime.recording = None;
         runtime.system_audio_ducker = None;
         runtime.target = None;
-        runtime.model_load_error = None;
         runtime.phase = Phase::Idle;
-        request_id
+        (request_id, cancelled_phase)
     };
+    if cancel_interrupts_worker(cancelled_phase) {
+        let _ = state.worker_canceller.cancel();
+    }
     let _ = state.escape_shortcut.send(false);
     let english = app_uses_english(app);
     terminal_overlay(
@@ -1667,7 +1799,7 @@ fn fail_task(app: &AppHandle, request_id: &str, error: &str) {
         let _ = app.emit("gpu-fallback-required", error.to_owned());
     }
     if config.error_sound {
-        platform_windows::play_sound("error");
+        platform::play_sound("error");
     }
     terminal_overlay(
         app,
@@ -1687,7 +1819,6 @@ fn reset_task(app: &AppHandle, request_id: &str) {
             runtime.recording = None;
             runtime.system_audio_ducker = None;
             runtime.target = None;
-            runtime.model_load_error = None;
             runtime.preview_text.clear();
             runtime.phase = Phase::Idle;
         }
@@ -1702,10 +1833,6 @@ fn spawn_stream_preview(app: AppHandle, request_id: String) {
             Ok(repository) => repository,
             Err(_) => return,
         };
-        let model = match repository.definition(PREVIEW_MODEL_ID).cloned() {
-            Ok(model) => model,
-            Err(_) => return,
-        };
         let model_path = match repository.installed_path(PREVIEW_MODEL_ID) {
             Ok(path)
                 if repository
@@ -1715,6 +1842,10 @@ fn spawn_stream_preview(app: AppHandle, request_id: String) {
                 path
             }
             _ => return,
+        };
+        let model = match repository.installed_definition(PREVIEW_MODEL_ID, &model_path) {
+            Ok(model) => model,
+            Err(_) => return,
         };
         let dependency = match resolve_runtime_dependency(&model, "cpu") {
             Ok(dependency) => dependency,
@@ -1896,14 +2027,10 @@ fn show_overlay(
             .overlay_visible
             .store(false, Ordering::Relaxed);
         if let Some(window) = app.get_webview_window("overlay") {
-            if let Ok(hwnd) = window.hwnd() {
-                platform_windows::hide_window(hwnd.0 as isize);
-            }
+            platform::hide_window(&window);
         }
         if let Some(window) = app.get_webview_window("overlay-cancel") {
-            if let Ok(hwnd) = window.hwnd() {
-                platform_windows::hide_window(hwnd.0 as isize);
-            }
+            platform::hide_window(&window);
         }
         return;
     }
@@ -1931,19 +2058,13 @@ fn show_overlay(
             }
         }
         let _ = window.set_ignore_cursor_events(true);
-        if let Ok(hwnd) = window.hwnd() {
-            let _ = platform_windows::show_without_activation(hwnd.0 as isize);
-        }
+        let _ = platform::show_without_activation(&window, false);
     }
     if let Some(window) = app.get_webview_window("overlay-cancel") {
         if matches!(state_name, "recording" | "loading" | "transcribing") {
-            if let Ok(hwnd) = window.hwnd() {
-                let _ = platform_windows::show_without_activation(hwnd.0 as isize);
-            }
+            let _ = platform::show_without_activation(&window, true);
         } else {
-            if let Ok(hwnd) = window.hwnd() {
-                platform_windows::hide_window(hwnd.0 as isize);
-            }
+            platform::hide_window(&window);
         }
     }
     emit_overlay(app, state_name, title, detail, level);
@@ -1966,12 +2087,20 @@ fn emit_overlay(app: &AppHandle, state_name: &str, title: &str, detail: &str, le
     };
     let _ = app.emit_to("overlay", "overlay-status", payload.clone());
     let _ = app.emit_to("overlay-cancel", "overlay-status", payload);
+    emit_main_audio_state(app, state_name, level);
+    epoch
+}
+
+fn emit_main_audio_state(app: &AppHandle, state_name: &str, level: f32) {
     let _ = app.emit_to(
         "main",
         "audio-level",
         serde_json::json!({ "state": state_name, "level": level }),
     );
-    epoch
+}
+
+fn terminal_overlay_should_show(show_overlay: bool, overlay_visible: bool) -> bool {
+    show_overlay && overlay_visible
 }
 
 fn terminal_overlay(app: &AppHandle, _request_id: &str, state: &str, title: &str, detail: &str) {
@@ -1981,17 +2110,16 @@ fn terminal_overlay(app: &AppHandle, _request_id: &str, state: &str, title: &str
         .lock()
         .map(|config| config.clone())
         .unwrap_or_default();
-    if !config.show_overlay {
-        return;
-    }
     let app_state = app.state::<AppState>();
-    if !app_state.overlay_visible.load(Ordering::Relaxed) {
+    if !terminal_overlay_should_show(
+        config.show_overlay,
+        app_state.overlay_visible.load(Ordering::Relaxed),
+    ) {
+        emit_main_audio_state(app, state, 0.0);
         return;
     }
     if let Some(window) = app.get_webview_window("overlay-cancel") {
-        if let Ok(hwnd) = window.hwnd() {
-            platform_windows::hide_window(hwnd.0 as isize);
-        }
+        platform::hide_window(&window);
     }
     let epoch = emit_overlay(app, state, title, detail, 0.0);
     let app = app.clone();
@@ -2000,9 +2128,7 @@ fn terminal_overlay(app: &AppHandle, _request_id: &str, state: &str, title: &str
         let state = app.state::<AppState>();
         if state.overlay_epoch.load(Ordering::Relaxed) == epoch {
             if let Some(window) = app.get_webview_window("overlay") {
-                if let Ok(hwnd) = window.hwnd() {
-                    platform_windows::hide_window(hwnd.0 as isize);
-                }
+                platform::hide_window(&window);
             }
         }
     });
@@ -2014,16 +2140,8 @@ fn ephemeral(app: &AppHandle, state: &str, title: &str, detail: &str) {
 }
 
 fn model_repository(state: &AppState) -> Result<ModelRepository, String> {
-    let configured = state
-        .config
-        .lock()
-        .map_err(|_| "配置状态损坏")?
-        .model_storage_dir
-        .clone();
-    let root = configured
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.default_model_root.clone());
+    let config = state.config.lock().map_err(|_| "配置状态损坏")?;
+    let root = configured_model_root(&state.default_model_root, &config);
     ModelRepository::new(root)
 }
 
@@ -2033,10 +2151,14 @@ fn current_adapter(state: &AppState, config: &Config) -> Result<String, String> 
     } else {
         &config.selected_model_id
     };
-    Ok(model_repository(state)?
-        .definition(model_id)?
-        .adapter_type
-        .clone())
+    let repository = model_repository(state)?;
+    let path = std::path::Path::new(&config.model_path);
+    Ok(if path.join(".rain-model.json").is_file() {
+        repository.installed_definition(model_id, path)?
+    } else {
+        repository.platform_definition(model_id)?
+    }
+    .adapter_type)
 }
 
 fn prefers_native_sensevoice(config: &Config, adapter_type: &str) -> bool {
@@ -2073,24 +2195,27 @@ fn schedule_model_unload(app: &AppHandle) {
         config.idle_timeout_seconds
     };
     let app = app.clone();
-    thread::spawn(move || {
+    tauri::async_runtime::spawn(async move {
         if delay > 0 {
-            thread::sleep(Duration::from_secs(delay));
+            tokio::time::sleep(Duration::from_secs(delay)).await;
         }
-        let state = app.state::<AppState>();
-        let idle = state
-            .runtime
-            .lock()
-            .map(|runtime| runtime.phase == Phase::Idle)
-            .unwrap_or(false);
-        if unload_timer_is_current(idle, epoch, state.unload_epoch.load(Ordering::Relaxed)) {
-            if let Ok(mut worker) = state.worker.lock() {
-                let _ = worker.unload();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let idle = state
+                .runtime
+                .lock()
+                .map(|runtime| runtime.phase == Phase::Idle)
+                .unwrap_or(false);
+            if unload_timer_is_current(idle, epoch, state.unload_epoch.load(Ordering::Relaxed)) {
+                if let Ok(mut worker) = state.worker.lock() {
+                    let _ = worker.unload();
+                }
+                if let Ok(mut worker) = state.preview_worker.lock() {
+                    let _ = worker.unload();
+                }
             }
-            if let Ok(mut worker) = state.preview_worker.lock() {
-                let _ = worker.unload();
-            }
-        }
+        })
+        .await;
     });
 }
 
@@ -2266,7 +2391,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                     .lock()
                     .map(|runtime| runtime.phase != Phase::Idle)
                     .unwrap_or(false);
-                if !busy || platform_windows::confirm_exit(app_uses_english(app)) {
+                if !busy || platform::confirm_exit(app_uses_english(app)) {
                     let _ = cancel(app);
                     app.exit(0);
                 }
@@ -2292,7 +2417,9 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn main() {
-    let _single_instance = match platform_windows::SingleInstanceGuard::acquire() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    #[cfg(windows)]
+    let _single_instance = match platform::SingleInstanceGuard::acquire() {
         Ok(Some(guard)) => guard,
         Ok(None) => return,
         Err(error) => {
@@ -2373,7 +2500,9 @@ fn main() {
                 .app_cache_dir()?
                 .join("worker")
                 .join("rain_worker.py");
-            let bundled_worker = runtime_root.join("runtime-not-installed.exe");
+            let bundled_worker = runtime_root.join(MISSING_RUNTIME_EXECUTABLE);
+            let worker = WorkerClient::new(worker_script.clone(), bundled_worker.clone());
+            let worker_canceller = worker.canceller();
             let log_dir = app.path().app_log_dir()?;
             diagnostics::install_panic_marker(log_dir.clone());
             let (escape_shortcut, escape_shortcut_commands) = mpsc::channel();
@@ -2394,10 +2523,8 @@ fn main() {
                 runtime_root,
                 text_runtime_root,
                 runtime: Mutex::new(Runtime::default()),
-                worker: Arc::new(Mutex::new(WorkerClient::new(
-                    worker_script.clone(),
-                    bundled_worker.clone(),
-                ))),
+                worker: Arc::new(Mutex::new(worker)),
+                worker_canceller,
                 preview_worker: Arc::new(Mutex::new(WorkerClient::new(
                     worker_script.clone(),
                     bundled_worker,
@@ -2414,6 +2541,9 @@ fn main() {
             });
             let state = app.state::<AppState>();
             let mut loaded = config::load(&state.config_path);
+            if loaded.normalize_loaded_for_platform() {
+                config::save(&state.config_path, &loaded)?;
+            }
             if loaded.selected_model_id.is_empty() && !loaded.model_path.is_empty() {
                 loaded.selected_model_id = "sensevoice-small".into();
             }
@@ -2482,10 +2612,8 @@ fn main() {
             test_input_level,
             check_worker,
             get_runtime_status,
-            refresh_runtime_status,
             get_text_polish_status,
             delete_text_model,
-            delete_text_runtime,
             list_models,
             check_model_updates,
             download_model,
@@ -2526,6 +2654,62 @@ mod tests {
     fn configured_hotkey_matches_canonical_callback_identity() {
         let callback = "Shift+Control+Space".parse::<Shortcut>().unwrap();
         assert!(shortcut_matches_configured(&callback, "Ctrl+Shift+Space"));
+        let mac_callback = "Shift+Super+Space".parse::<Shortcut>().unwrap();
+        assert!(shortcut_matches_configured(
+            &mac_callback,
+            "Super+Shift+Space"
+        ));
+    }
+
+    #[test]
+    fn failed_candidate_hotkey_keeps_the_registered_previous_shortcut() {
+        assert!(shortcut_registration_required(true, true));
+        assert!(!shortcut_registration_required(false, true));
+        assert!(shortcut_registration_required(false, false));
+    }
+
+    #[test]
+    fn storage_root_change_is_blocked_for_selected_or_installed_models() {
+        assert!(!model_storage_in_use(false, false));
+        assert!(model_storage_in_use(true, false));
+        assert!(model_storage_in_use(false, true));
+        let root = std::env::temp_dir();
+        assert!(same_model_root(&root, &root));
+    }
+
+    #[test]
+    fn model_deletion_is_blocked_while_a_download_is_active() {
+        assert!(ensure_model_deletion_allowed(&None).is_ok());
+        let active = Some(ActiveDownload {
+            model_id: "model".into(),
+            paused: Arc::new(AtomicBool::new(false)),
+        });
+        assert!(ensure_model_deletion_allowed(&active).is_err());
+    }
+
+    #[test]
+    fn hidden_overlay_still_has_a_terminal_state_to_project() {
+        assert!(terminal_overlay_should_show(true, true));
+        assert!(!terminal_overlay_should_show(false, true));
+        assert!(!terminal_overlay_should_show(true, false));
+    }
+
+    #[test]
+    fn crash_backend_identifies_the_active_managed_component() {
+        let status = RuntimeStatus {
+            ready: true,
+            source: "managed".into(),
+            nvidia_detected: false,
+            nvidia_name: None,
+            recommended_accelerator: "cpu".into(),
+            active_component_id: Some("rain-runtime-onnx-cpu".into()),
+            active_executable: None,
+            components: Vec::new(),
+        };
+        assert_eq!(
+            runtime_backend_label(&status),
+            "managed:rain-runtime-onnx-cpu"
+        );
     }
 
     #[test]
@@ -2572,6 +2756,9 @@ mod tests {
         assert!(can_cancel(Phase::WaitingForModel));
         assert!(can_cancel(Phase::Transcribing));
         assert!(!can_cancel(Phase::Injecting));
+        assert!(!cancel_interrupts_worker(Phase::Recording));
+        assert!(cancel_interrupts_worker(Phase::WaitingForModel));
+        assert!(cancel_interrupts_worker(Phase::Transcribing));
     }
 
     #[test]

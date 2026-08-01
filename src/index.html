@@ -23,32 +23,31 @@
             <svg class="theme-icon moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"></path></svg>
             <span id="theme-label">浅色模式</span>
           </button>
-          <button id="minimize" class="chrome-button" aria-label="最小化"><svg class="chrome-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
-          <button id="close" class="chrome-button close" aria-label="关闭"><svg class="chrome-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+          <button id="minimize" class="chrome-button" aria-label="最小化" data-i18n-aria="minimize"><svg class="chrome-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg></button>
+          <button id="close" class="chrome-button close" aria-label="关闭" data-i18n-aria="close"><svg class="chrome-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
         </div>
       </header>
 
       <div class="app-layout">
-        <aside class="rail" aria-label="设置导航">
+        <aside class="rail" aria-label="设置导航" data-i18n-aria="settings_navigation">
           <nav>
-            <button class="nav-item active" data-section="home"><i aria-hidden="true">&#xE80F;</i><span data-i18n="nav_home">首页</span></button>
-            <button class="nav-item" data-section="voice"><i aria-hidden="true">&#xE720;</i><span data-i18n="nav_voice">录音与快捷键</span></button>
-            <button class="nav-item" data-section="output"><i aria-hidden="true">&#xE8D7;</i><span data-i18n="nav_output">文字写入</span></button>
-            <button class="nav-item" data-section="feedback"><i aria-hidden="true">&#xE8BD;</i><span data-i18n="nav_feedback">状态反馈</span></button>
-            <button class="nav-item" data-section="models"><i aria-hidden="true">&#xE7B8;</i><span data-i18n="nav_model_library">模型库</span></button>
-            <button class="nav-item" data-section="text-polish"><i aria-hidden="true">&#xE8D2;</i><span data-i18n="nav_text_polish">文本整理</span></button>
-            <button class="nav-item" data-section="runtime-settings"><i aria-hidden="true">&#xE950;</i><span data-i18n="nav_runtime_settings">推理设置</span></button>
-            <button class="nav-item" data-section="general"><i aria-hidden="true">&#xE713;</i><span data-i18n="nav_app_settings">应用设置</span></button>
-            <button class="nav-item" data-section="privacy"><i aria-hidden="true">&#xE83D;</i><span data-i18n="nav_privacy">隐私与诊断</span></button>
+            <button class="nav-item active" data-section="home"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-7 9 7"></path><path d="M5 10v10h14V10M9 20v-6h6v6"></path></svg><span data-i18n="nav_home">首页</span></button>
+            <button class="nav-item" data-section="voice"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg><span data-i18n="nav_voice">录音与快捷键</span></button>
+            <button class="nav-item" data-section="output"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"></path></svg><span data-i18n="nav_output">文字写入</span></button>
+            <button class="nav-item" data-section="feedback"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h3l2-6 4 10 2-5h5"></path><path d="M20 6v14H4V4h10"></path></svg><span data-i18n="nav_feedback">状态反馈</span></button>
+            <button class="nav-item" data-section="models"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path></svg><span data-i18n="nav_model_library">模型库</span></button>
+            <button class="nav-item" data-section="text-polish"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M4 11h7M4 16h9"></path><path d="m17 4 .7 2.3L20 7l-2.3.7L17 10l-.7-2.3L14 7l2.3-.7ZM18.5 13l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9Z"></path></svg><span data-i18n="nav_text_polish">文本整理</span></button>
+            <button class="nav-item" data-section="runtime-settings"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3M10 10h4v4h-4z"></path></svg><span data-i18n="nav_runtime_settings">推理设置</span></button>
+            <button class="nav-item" data-section="general"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"></path></svg><span data-i18n="nav_app_settings">应用设置</span></button>
+            <button class="nav-item" data-section="privacy"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.9 8 7 10 4.1-2 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-4"></path></svg><span data-i18n="nav_privacy">隐私与诊断</span></button>
           </nav>
-          <div class="rail-note"><i></i><span data-i18n="local_only">音频与识别文字仅在本机内存中处理</span></div>
         </aside>
 
         <main class="content">
           <section id="home" class="page active">
             <div class="home-status-strip">
-              <div><i aria-hidden="true">&#xE950;</i><span data-i18n="current_device">当前推理设备</span><strong id="home-device">正在检查</strong></div>
-              <div><i aria-hidden="true">&#xE7B8;</i><span data-i18n="current_model">当前模型</span><strong id="home-model">未选择</strong></div>
+              <div><svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3M10 10h4v4h-4z"></path></svg><span data-i18n="current_device">当前推理设备</span><strong id="home-device">正在检查</strong></div>
+              <div><svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path></svg><span data-i18n="current_model">当前模型</span><strong id="home-model">未选择</strong></div>
             </div>
             <div class="home-test-card">
               <div class="home-test-heading">
@@ -60,18 +59,18 @@
               </div>
               <div class="home-voice-visual" aria-hidden="true">
                 <canvas id="home-waveform"></canvas>
-                <div class="home-mic-orb"><i>&#xE720;</i></div>
+                <div class="home-mic-orb"><svg class="home-mic-icon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg></div>
               </div>
               <div class="home-test-grid">
                 <label class="home-test-field">
                   <span data-i18n="home_test_input_label">输入框</span>
-                  <textarea id="home-test-input" rows="2" autofocus data-i18n-placeholder="home_test_input_placeholder" placeholder="点击这里，然后按住快捷键说话"></textarea>
+                  <textarea id="home-test-input" rows="2" data-i18n-placeholder="home_test_input_placeholder" placeholder="点击这里，然后按住快捷键说话"></textarea>
                 </label>
               </div>
             </div>
             <div class="home-status-strip home-status-strip-bottom">
-              <div><i aria-hidden="true">&#xE765;</i><span data-i18n="current_hotkey">当前快捷键</span><strong id="home-hotkey">Ctrl + Shift + Space</strong></div>
-              <div><i aria-hidden="true">&#xE720;</i><span data-i18n="recording_mode">录音方式</span><strong id="home-recording-mode">按住说话，松开识别</strong></div>
+              <div><svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M18 10h.01M7 14h10"></path></svg><span data-i18n="current_hotkey">当前快捷键</span><strong id="home-hotkey">Ctrl + Shift + Space</strong></div>
+              <div><svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"></path></svg><span data-i18n="recording_mode">录音方式</span><strong id="home-recording-mode">按住说话，松开识别</strong></div>
             </div>
             <div id="recovery" class="recovery" hidden>
               <div><span data-i18n="recovery_label">待恢复文字</span><strong data-i18n="recovery_title">目标位置和剪贴板均不可用，请手动复制</strong></div>
@@ -81,7 +80,7 @@
           </section>
 
           <section id="voice" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_capture">录音采集</div><h1 data-i18n="voice_title">录音与快捷键</h1><p data-i18n="voice_page_description">设置录音方式、全局快捷键和麦克风输入。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="voice_title">录音与快捷键</h1><p data-i18n="voice_page_description">设置录音方式、全局快捷键和麦克风输入。</p></div></div>
             <div class="settings-grid">
               <label class="field-card"><span data-i18n="recording_mode">录音方式</span><select id="recording-mode"><option value="push_to_talk" data-i18n="push_to_talk">按住说话，松开识别</option><option value="toggle" data-i18n="toggle_mode">按一次开始，再按一次结束</option></select></label>
               <div class="field-card"><span data-i18n="hotkey">全局快捷键</span><button id="hotkey-recorder" class="key-recorder" type="button">Ctrl + Shift + Space</button><small data-i18n="hotkey_hint">点击后按下新的组合键；注册失败会自动保留旧快捷键。</small></div>
@@ -93,7 +92,7 @@
           </section>
 
           <section id="output" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_output">文字投递</div><h1 data-i18n="output_page_title">文字写入</h1><p data-i18n="output_page_description">选择识别文字的写入方式与剪贴板保护策略。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="output_page_title">文字写入</h1><p data-i18n="output_page_description">选择识别文字的写入方式与剪贴板保护策略。</p></div></div>
             <div class="settings-grid">
               <label class="field-card"><span data-i18n="injection">输入方式</span><select id="injection-method"><option value="clipboard" data-i18n="clipboard_mode">剪贴板粘贴（推荐）</option><option value="typing" data-i18n="typing_mode">模拟逐字输入</option></select><small data-i18n="injection_hint">粘贴兼容性更好；逐字输入不会使用剪贴板，但速度较慢。</small></label>
               <label class="field-card switch-card"><span><b data-i18n="restore_clipboard">粘贴后恢复剪贴板</b><small data-i18n="restore_hint">若期间检测到用户复制了新内容，Rain 不会覆盖它。</small></span><input id="restore-clipboard" type="checkbox" /></label>
@@ -103,7 +102,7 @@
           </section>
 
           <section id="feedback" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_feedback">反馈</div><h1 data-i18n="feedback_page_title">状态反馈</h1><p data-i18n="feedback_page_description">调整状态浮窗、显示透明度和操作提示音。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="feedback_page_title">状态反馈</h1><p data-i18n="feedback_page_description">调整状态浮窗、显示透明度和操作提示音。</p></div></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="overlay">显示状态悬浮条</b><small data-i18n="overlay_hint">显示录音音量、时长、模型加载、识别和错误状态。</small></span><input id="show-overlay" type="checkbox" /></label>
               <label class="field-card range-card"><span><b data-i18n="overlay_transparency">浮窗透明度</b><output id="overlay-transparency-value">90%</output></span><input id="overlay-transparency" type="range" min="0" max="100" step="1" value="90" /><small data-i18n="overlay_transparency_hint">只调整背景，文字和按钮保持清晰。</small></label>
@@ -115,12 +114,12 @@
           </section>
 
           <section id="models" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_models">本地模型</div><h1 data-i18n="model_library_title">模型库</h1><p data-i18n="models_page_description">下载、切换和管理本地语音模型。</p></div><div class="action-row compact"><button id="refresh-models" class="ghost" data-i18n="refresh">刷新</button><button id="check-model-updates" class="secondary" data-i18n="check_model_updates">检查模型更新</button></div></div>
+            <div class="page-heading"><div><h1 data-i18n="model_library_title">模型库</h1><p data-i18n="models_page_description">下载、切换和管理本地语音模型。</p></div><div class="action-row compact"><button id="refresh-models" class="ghost" data-i18n="refresh">刷新</button><button id="check-model-updates" class="secondary" data-i18n="check_model_updates">检查模型更新</button></div></div>
             <div id="model-list" class="model-list" aria-live="polite"></div>
           </section>
 
           <section id="text-polish" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="text_polish">文本整理</div><h1 data-i18n="text_polish_page_title">文本整理</h1><p data-i18n="text_polish_page_description">使用本地小模型整理标点、分段和停顿词。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="text_polish_page_title">文本整理</h1><p data-i18n="text_polish_page_description">使用本地小模型整理标点、分段和停顿词。</p></div></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="text_polish">文本整理</b><small data-i18n="text_polish_hint">识别后在本机整理标点和分段。</small></span><input id="text-polish-enabled" type="checkbox" /></label>
               <label class="field-card switch-card"><span><b data-i18n="text_polish_rewrite">文本润色</b><small data-i18n="text_polish_rewrite_hint">轻度调整措辞、语序和重复表达，同时保护原意、数字、英文和受保护词。</small></span><input id="text-polish-rewrite" type="checkbox" /></label>
@@ -141,9 +140,9 @@
           </section>
 
           <section id="runtime-settings" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="runtime_component">本地推理组件</div><h1 data-i18n="runtime_settings_title">推理设置</h1><p data-i18n="runtime_page_description">选择推理设备并管理模型的加载与卸载。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="runtime_settings_title">推理设置</h1><p data-i18n="runtime_page_description">选择推理设备并管理模型的加载与卸载。</p></div></div>
             <div class="settings-grid">
-              <div class="field-card wide"><span data-i18n="storage_dir">模型存储目录</span><div class="path-row"><input id="model-storage-dir" readonly placeholder="使用应用默认目录" /><button id="pick-storage-dir" class="secondary" data-i18n="choose">选择</button><button id="reset-storage-dir" class="ghost" data-i18n="reset">恢复默认</button></div><small data-i18n="storage_hint">更改后只影响后续下载；已安装模型不会自动移动。</small></div>
+              <div class="field-card wide"><span data-i18n="storage_dir">模型存储目录</span><div class="path-row"><input id="model-storage-dir" readonly placeholder="使用应用默认目录" /><button id="pick-storage-dir" class="secondary" data-i18n="choose">选择</button><button id="reset-storage-dir" class="ghost" data-i18n="reset">恢复默认</button></div><small data-i18n="storage_hint">更改目录前请先删除已安装模型；模型不会自动迁移。</small></div>
               <label class="field-card"><span data-i18n="device">推理设备</span><select id="device-preference"><option value="auto" data-i18n="auto_device">自动选择</option><option value="cuda">CUDA</option><option value="cpu">CPU</option></select><small data-i18n="cpu_hint">CPU 模式功能完整，但大型模型的识别速度可能明显较慢。</small></label>
               <label class="field-card"><span data-i18n="load_mode">模型加载方式</span><select id="model-load-mode"><option value="on_demand" data-i18n="on_demand">录音时并行加载</option><option value="resident" data-i18n="resident">常驻内存</option></select></label>
               <label class="field-card"><span data-i18n="unload_policy">模型卸载策略</span><select id="unload-policy"><option value="immediate" data-i18n="unload_now">识别后立即卸载</option><option value="idle_timeout" data-i18n="unload_idle">空闲后卸载</option><option value="session" data-i18n="unload_session">退出时卸载</option></select></label>
@@ -154,9 +153,9 @@
           </section>
 
           <section id="general" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_system">系统</div><h1 data-i18n="app_settings_title">应用设置</h1><p data-i18n="app_page_description">设置开机启动、界面语言和软件更新。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="app_settings_title">应用设置</h1><p data-i18n="app_page_description">设置开机启动、界面语言和软件更新。</p></div></div>
             <div class="settings-grid">
-              <label class="field-card switch-card"><span><b data-i18n="autostart">登录 Windows 时启动</b><small data-i18n="autostart_hint">默认开启，应用启动后驻留系统托盘。</small></span><input id="autostart" type="checkbox" /></label>
+              <label class="field-card switch-card"><span><b data-i18n="autostart">登录 Windows 时启动</b><small data-i18n="autostart_hint">默认开启，应用启动后驻留系统托盘。</small><small id="autostart-error" class="inline-result" aria-live="polite" hidden></small></span><input id="autostart" type="checkbox" /></label>
               <label class="field-card switch-card"><span><b data-i18n="auto_update">启动时检查更新</b><small data-i18n="auto_update_hint">只检查签名更新，不会自动安装。</small></span><input id="auto-check-updates" type="checkbox" /></label>
               <label class="field-card"><span data-i18n="language">界面语言</span><select id="ui-language"><option value="system" data-i18n="follow_system">跟随系统</option><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
               <div class="field-card"><span data-i18n="updates">软件更新</span><div class="action-row compact"><button id="check-update" class="secondary" data-i18n="check_update">检查更新</button><button id="install-update" class="primary" hidden data-i18n="install_update">安装并重启</button></div><small id="update-result" aria-live="polite"></small></div>
@@ -164,7 +163,7 @@
           </section>
 
           <section id="privacy" class="page">
-            <div class="page-heading"><div><div class="eyebrow" data-i18n="section_privacy">隐私</div><h1 data-i18n="privacy_title">隐私与诊断</h1><p data-i18n="privacy_page_description">管理本地诊断、崩溃报告与日志导出。</p></div></div>
+            <div class="page-heading"><div><h1 data-i18n="privacy_title">隐私与诊断</h1><p data-i18n="privacy_page_description">管理本地诊断、崩溃报告与日志导出。</p></div></div>
             <div class="privacy-banner"><strong data-i18n="privacy_banner">默认不上传，不留录音，不留文字历史。</strong><p data-i18n="privacy_detail">诊断事件只记录错误代码、模型 ID 与耗时。导出前会列出文件并由你选择保存位置。</p></div>
             <div class="settings-grid">
               <label class="field-card switch-card"><span><b data-i18n="crash_reports">匿名崩溃报告</b><small data-i18n="crash_hint">默认关闭。当前构建只生成本地崩溃标记，不包含音频或识别文字。</small></span><input id="anonymous-crash-reports" type="checkbox" /></label>
@@ -177,8 +176,6 @@
 
     <div id="onboarding" class="modal-backdrop" hidden>
       <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-        <div class="onboarding-rain"><span></span><span></span><span></span></div>
-        <p class="eyebrow" data-i18n="onboarding_welcome">欢迎使用雨音输入法</p>
         <h2 id="onboarding-title" data-i18n="onboarding_title">自动配置本地语音识别</h2>
         <p data-i18n="onboarding_text">Rain 会下载轻量原生推理组件和 SenseVoice Small 原生模型；全部校验通过后即可使用。</p>
         <div id="onboarding-system-error" class="onboarding-warning" hidden><strong data-i18n="hotkey_conflict">默认快捷键不可用</strong><span id="onboarding-system-error-detail"></span><button id="fix-hotkey" class="secondary" data-i18n="record_new_hotkey">录制新快捷键</button></div>

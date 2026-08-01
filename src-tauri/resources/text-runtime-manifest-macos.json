@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "manifest_version": "b10016-macos-arm64",
+  "components": [
+    {
+      "id": "llama-text-cpu-macos-arm64",
+      "display_name": "llama.cpp 文本整理 · Apple Silicon Metal",
+      "version": "b10016",
+      "accelerator": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10016/llama-b10016-bin-macos-arm64.tar.gz",
+      "archive_size": 10770847,
+      "installed_size": 26675510,
+      "sha256": "845211ba3fd3fe5cf365de8ceaa0d73ef85d89830cf5dbddd5d645a2cdb8e09c",
+      "executable": "llama-b10016/llama-server"
+    }
+  ]
+}
