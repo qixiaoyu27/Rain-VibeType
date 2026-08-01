@@ -2292,6 +2292,14 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn main() {
+    let _single_instance = match platform_windows::SingleInstanceGuard::acquire() {
+        Ok(Some(guard)) => guard,
+        Ok(None) => return,
+        Err(error) => {
+            eprintln!("{error}");
+            return;
+        }
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -2410,6 +2418,18 @@ fn main() {
                 loaded.selected_model_id = "sensevoice-small".into();
             }
             *state.config.lock().map_err(|_| "配置状态损坏")? = loaded.clone();
+            if !loaded.selected_model_id.is_empty() {
+                if let Ok(path) = model_repository(&state)
+                    .and_then(|repository| repository.installed_path(&loaded.selected_model_id))
+                {
+                    let path = path.to_string_lossy().into_owned();
+                    if loaded.model_path != path {
+                        loaded.model_path = path;
+                        config::save(&state.config_path, &loaded)?;
+                        *state.config.lock().map_err(|_| "配置状态损坏")? = loaded.clone();
+                    }
+                }
+            }
             worker::install_script(&worker_script)?;
             configure_worker_runtime(&state, &loaded)?;
             let shortcut_result = app.global_shortcut().register(loaded.hotkey.as_str());

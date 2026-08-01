@@ -10,7 +10,7 @@ use windows::Win32::{
     },
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, GlobalFree, HANDLE, RECT},
+    Foundation::{CloseHandle, GetLastError, GlobalFree, ERROR_ALREADY_EXISTS, HANDLE, RECT},
     Globalization::GetUserDefaultUILanguage,
     Graphics::Gdi::{
         CopyEnhMetaFileW, DeleteEnhMetaFile, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
@@ -29,6 +29,7 @@ use windows_sys::Win32::{
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         },
         Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
+        Threading::CreateMutexW,
     },
     UI::{
         Input::KeyboardAndMouse::{
@@ -42,6 +43,39 @@ use windows_sys::Win32::{
         },
     },
 };
+
+pub struct SingleInstanceGuard(HANDLE);
+
+impl SingleInstanceGuard {
+    pub fn acquire() -> Result<Option<Self>, String> {
+        Self::acquire_named("Local\\RainVibetype.SingleInstance")
+    }
+
+    fn acquire_named(name: &str) -> Result<Option<Self>, String> {
+        let name = name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let handle = unsafe { CreateMutexW(ptr::null(), 0, name.as_ptr()) };
+        if handle.is_null() {
+            return Err(format!(
+                "无法创建单实例锁：{}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+            unsafe { CloseHandle(handle) };
+            return Ok(None);
+        }
+        Ok(Some(Self(handle)))
+    }
+}
+
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
 
 pub fn free_disk_space(path: &Path) -> Option<u64> {
     use std::{ffi::OsStr, iter, os::windows::ffi::OsStrExt};
@@ -597,5 +631,12 @@ mod tests {
     #[test]
     fn system_audio_is_reduced_to_twenty_percent() {
         assert!((ducked_volume(0.75) - 0.15).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn second_instance_is_rejected() {
+        let name = format!("Local\\RainVibetype.Test.{}", std::process::id());
+        let _first = SingleInstanceGuard::acquire_named(&name).unwrap().unwrap();
+        assert!(SingleInstanceGuard::acquire_named(&name).unwrap().is_none());
     }
 }
