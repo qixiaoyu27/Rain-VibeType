@@ -1158,7 +1158,10 @@ mod tests {
             .models
             .iter()
             .all(|model| !model.files.is_empty()
-                && model.files.iter().all(|file| file.sha256.len() == 64)));
+                && model.files.iter().all(|file| file.sha256.len() == 64
+                    && file.url.as_deref().is_some_and(|url| url.starts_with(
+                        "https://github.com/qixiaoyu27/Rain-VibeType/releases/download/"
+                    )))));
         assert_eq!(
             repository
                 .definition("sensevoice-small")
