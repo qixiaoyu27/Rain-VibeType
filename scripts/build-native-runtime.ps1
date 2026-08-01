@@ -1,5 +1,5 @@
 param(
-    [string]$RuntimeVersion = "1.1.0",
+    [string]$RuntimeVersion = "1.0.0",
     [string]$ArtifactBaseUrl = "https://github.com/qixiaoyu27/Rain-VibeType/releases/latest/download",
     [string]$OutputDirectory = ""
 )
